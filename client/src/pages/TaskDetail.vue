@@ -1,27 +1,24 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTheme } from '../composables/useTheme.js';
 
 const { theme, toggle: toggleTheme } = useTheme();
 import { http } from '../api/http.js';
-import { createTaskSocket } from '../api/socket.js';
-import ChatPanel from '../components/ChatPanel.vue';
+import ChatPane from '../components/ChatPane.vue';
 import InfoPanel from '../components/InfoPanel.vue';
 import OutputPanel from '../components/OutputPanel.vue';
 
 const props = defineProps({ id: { type: String, required: true } });
 const router = useRouter();
 
-const task        = ref(null);
-const messages    = ref([]);
-const streaming   = ref(false);
-const streamText  = ref('');
-const thinking    = ref(false);
-const toolCalls   = ref([]);
-const wsConnected  = ref(false);   // WebSocket 是否已连接
-const autoStarted  = ref(false);   // 防止重复自动发送
-let socket = null;
+const task     = ref(null);
+const sessions = ref([]);          // Session[]（会话级数据源，ChatPane 直接改 status）
+const panes    = ref(['main']);    // 打开的 sessionId 数组（Task 10 扩展为最多 2 个分屏）
+const paneRefs = ref([]);          // ChatPane expose 的实例（loadHistory/connect/close/...）
+
+// header 连接状态点：取主 pane 的 wsConnected
+const wsConnected = computed(() => paneRefs.value[0]?.wsConnected ?? false);
 
 // 面板宽度
 const infoPanelWidth  = ref(280);
@@ -49,6 +46,14 @@ function onOpenDiff(filePath) {
   outputDiffFile.value = filePath;
   openOutput('diff');
 }
+
+// 任一 pane agent done：产出物面板打开时自动刷新
+function onPaneDone() {
+  if (showOutput.value) outputRefresh.value++;
+}
+
+// Task 8/10 用：切换某 pane 显示的会话
+async function switchPane(paneIdx, sessionId) { /* Task 10 实现 */ }
 
 // 拖拽状态
 let startX = 0;
@@ -84,156 +89,22 @@ function stopResize() {
 async function init() {
   try {
     task.value = await http.getTask(props.id);
-    messages.value = await http.getMessages(props.id);
-    connectSocket();
+    sessions.value = task.value.sessions ?? [];
+    await nextTick();
+    // 加载历史 + 连接每个打开的 pane
+    for (const p of paneRefs.value) {
+      await p.loadHistory();
+      p.connect();
+    }
   } catch (e) {
     console.error('加载任务失败:', e);
     router.push('/');
   }
 }
 
-function connectSocket() {
-  socket = createTaskSocket(props.id);
-
-  // 服务端确认连接
-  socket.on('connected', () => {
-    wsConnected.value = true;
-    // 重连到正在运行的任务：显示 loading，等待服务端补发的 chunk
-    if (task.value?.status === 'running') {
-      thinking.value = true;
-    }
-    // 新任务（无历史消息）→ 自动发送任务目的，启动 AI 工作流
-    if (!autoStarted.value && messages.value.length === 0 && task.value?.purpose) {
-      autoStarted.value = true;
-      onSend(task.value.purpose);
-    }
-  });
-
-  socket.on('chunk', ({ text }) => {
-    thinking.value = false;
-    streaming.value = true;
-    streamText.value += text;
-  });
-
-  socket.on('tool_call', ({ name, input }) => {
-    toolCalls.value.push({ name, input, ts: Date.now() });
-  });
-
-  socket.on('done', async () => {
-    messages.value.push({
-      role: 'assistant',
-      content: streamText.value,
-      timestamp: new Date().toISOString(),
-      toolCalls: [],
-    });
-    streamText.value = '';
-    streaming.value = false;
-    thinking.value = false;
-    toolCalls.value = [];
-    // 刷新 task 状态（idle/running 由服务端维护）
-    try { task.value = await http.getTask(props.id); } catch { /* 忽略 */ }
-    // 产出物面板打开时，agent 完成后自动刷新
-    if (showOutput.value) outputRefresh.value++;
-  });
-
-  // 工具信号触发的状态变更（pending / reviewing / idle / error）
-  socket.on('status_change', ({ status }) => {
-    if (task.value) task.value.status = status;
-  });
-
-  // AI 声明改动范围后，刷新 task 的 watchedRepos
-  socket.on('repos_updated', async () => {
-    try { task.value = await http.getTask(props.id); } catch { /* 忽略 */ }
-  });
-
-  // 旧 interrupted 事件兼容（服务端已改为 status_change，保留兜底）
-  socket.on('interrupted', () => {
-    streaming.value = false;
-    streamText.value = '';
-    thinking.value = false;
-    toolCalls.value = [];
-    if (task.value) task.value.status = 'reviewing';
-  });
-
-  socket.on('error', ({ message: errMsg }) => {
-    streaming.value = false;
-    streamText.value = '';
-    thinking.value = false;
-    toolCalls.value = [];
-    if (task.value) task.value.status = 'error';
-    messages.value.push({
-      role: 'assistant',
-      content: `⚠️ 错误：${errMsg}`,
-      timestamp: new Date().toISOString(),
-      toolCalls: [],
-    });
-  });
-
-  // 上下文超阈值自动重开会话：提示用户本轮已开新会话
-  socket.on('context_reset', async ({ message }) => {
-    messages.value.push({
-      role: 'assistant',
-      content: `🔄 ${message}`,
-      timestamp: new Date().toISOString(),
-      toolCalls: [],
-    });
-    // 同步 task（sid 已清、contextTokens 已置空），前端用量百分比立即归零
-    try { task.value = await http.getTask(props.id); } catch { /* 忽略 */ }
-  });
-}
-
-function onStop() {
-  socket.send({ type: 'stop' });
-  // 乐观：立即把流式内容固化为中断消息，清空流式状态
-  if (streamText.value) {
-    messages.value.push({
-      role: 'assistant',
-      content: streamText.value,
-      timestamp: new Date().toISOString(),
-      toolCalls: [],
-      interrupted: true,
-    });
-  }
-  streamText.value = '';
-  streaming.value = false;
-  thinking.value = false;
-  toolCalls.value = [];
-  // 停止后统一 reviewing（任务已运行过，不回到 idle）
-  if (task.value) task.value.status = 'reviewing';
-}
-
-// 手动重开会话：清当前 sid，下次发消息开新会话
-async function onResetContext() {
-  try {
-    const r = await http.resetContext(props.id);
-    messages.value.push({
-      role: 'assistant',
-      content: `🔄 ${r.message}`,
-      timestamp: new Date().toISOString(),
-      toolCalls: [],
-    });
-    task.value = await http.getTask(props.id);   // 刷新（sid 已清，按钮随之隐藏）
-  } catch { /* 忽略 */ }
-}
-
-function onSend(content) {
-  messages.value.push({
-    role: 'user',
-    content,
-    timestamp: new Date().toISOString(),
-    toolCalls: [],
-  });
-  streamText.value = '';
-  thinking.value = true;
-  toolCalls.value = [];
-  // 乐观更新 header 状态
-  if (task.value) task.value.status = 'running';
-  socket.send({ type: 'message', content });
-}
-
 onMounted(init);
 onUnmounted(() => {
-  socket?.close();
+  paneRefs.value.forEach(p => p.close());
   stopResize();
 });
 </script>
@@ -266,18 +137,14 @@ onUnmounted(() => {
     </header>
 
     <div class="detail-body">
-      <ChatPanel
-        :messages="messages"
-        :streaming="streaming"
-        :stream-text="streamText"
-        :thinking="thinking"
-        :tool-calls="toolCalls"
-        :ws-connected="wsConnected"
+      <ChatPane
+        v-for="(sid, i) in panes" :key="sid"
+        ref="paneRefs"
+        :task-id="id"
+        :session="sessions.find(s => s.id === sid) ?? {}"
         :task="task"
-        :task-status="task.status"
-        @send="onSend"
-        @stop="onStop"
-        @reset-context="onResetContext"
+        :split="panes.length > 1"
+        @done="onPaneDone"
       />
 
       <div class="resize-handle" @mousedown="startResize($event, 'info')"></div>

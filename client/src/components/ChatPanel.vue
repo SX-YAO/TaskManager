@@ -9,7 +9,8 @@ const props = defineProps({
   toolCalls:   { type: Array,   default: () => [] },
   wsConnected: { type: Boolean, default: false },
   task:        { type: Object,  default: null },
-  taskStatus:  { type: String,  default: '' },  // 任务状态（idle/running/pending/reviewing/error）
+  session:     { type: Object,  default: null },  // 会话对象（contextTokens / claudeSessionId 数据源）
+  sessionStatus: { type: String, default: '' },   // 会话状态（idle/running/pending/reviewing/error）
 });
 
 const emit = defineEmits(['send', 'stop', 'reset-context']);
@@ -35,7 +36,7 @@ const isProcessing = computed(() => props.thinking || props.streaming);
 
 // 状态提示条（pending / reviewing / error）
 const statusBar = computed(() => {
-  switch (props.taskStatus) {
+  switch (props.sessionStatus) {
     case 'pending':   return { show: true, text: 'Agent 需要你的确认才能继续', icon: '🔔', cls: 'bar-pending' };
     case 'reviewing': return { show: true, text: '本轮产出已完成，可查看改动或继续发消息', icon: '📋', cls: 'bar-reviewing' };
     case 'error':     return { show: true, text: 'Agent 进程异常退出，发消息可重新启动', icon: '⚠️', cls: 'bar-error' };
@@ -52,11 +53,11 @@ const agentStatus = computed(() => {
   return { text: '就绪',     color: '#40c057', dot: false };
 });
 
-// 上下文用量：真实占用（task.contextTokens，来自会话文件最后一条 assistant usage）
-// / 真实窗口大小（task.contextWindow，来自 modelUsage.contextWindow）
+// 上下文用量：会话级真实占用（session.contextTokens，来自会话文件最后一条 assistant usage）
+// / 真实窗口大小（session.contextWindow，来自 modelUsage.contextWindow）
 const contextPercent = computed(() => {
-  const t = props.task?.contextTokens;
-  const w = props.task?.contextWindow || 1_000_000;   // 兜底 1M
+  const t = props.session?.contextTokens;
+  const w = props.session?.contextWindow || 1_000_000;   // 兜底 1M
   if (!t) return 0;
   return Math.min(100, Math.round(t / w * 100));
 });
@@ -199,7 +200,7 @@ function toolDesc({ name, input: inp }) {
             class="bubble"
             :class="{
               interrupted: msg.interrupted,
-              'pending-highlight': taskStatus === 'pending' && msg.role === 'assistant' && i === messages.length - 1
+              'pending-highlight': sessionStatus === 'pending' && msg.role === 'assistant' && i === messages.length - 1
             }"
           >{{ msg.content }}</div>
         </div>
@@ -251,7 +252,7 @@ function toolDesc({ name, input: inp }) {
         :title="`上下文占用 ${contextPercent}%`"
       >上下文 {{ contextPercent }}%</span>
       <button
-        v-if="task?.claudeSessionId && !isProcessing"
+        v-if="session?.claudeSessionId && !isProcessing"
         class="reset-ctx-btn"
         title="放弃当前会话，下次发消息开新会话并读取任务文件恢复上下文"
         @click="resetContext"
@@ -259,11 +260,11 @@ function toolDesc({ name, input: inp }) {
     </div>
 
     <!-- 输入区 -->
-    <div class="input-wrap" :class="{ 'input-pending': taskStatus === 'pending' }">
+    <div class="input-wrap" :class="{ 'input-pending': sessionStatus === 'pending' }">
       <textarea
         ref="textareaEl"
         v-model="input"
-        :placeholder="taskStatus === 'pending' ? '回复 Agent，按 Enter 发送…' : '输入消息，Enter 发送，Shift+Enter 换行…'"
+        :placeholder="sessionStatus === 'pending' ? '回复 Agent，按 Enter 发送…' : '输入消息，Enter 发送，Shift+Enter 换行…'"
         rows="1"
         :disabled="isProcessing"
         @keydown="onKeydown"
