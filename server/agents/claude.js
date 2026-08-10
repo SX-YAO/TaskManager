@@ -56,12 +56,15 @@ function readLastUsage(projectDir, sid) {
  * 创建 Claude CLI Agent
  * @param {string} taskId
  * @param {string} projectDir
- * @param {string|null} sessionId
+ * @param {string|null} sessionId          - claude CLI 的 resume sid（非任务会话 id）
  * @param {boolean} dangerouslySkipPermissions
  * @param {string|null} conflictWarning  目录冲突时注入的警告文本
+ * @param {string|null} scopeConstraint  写入范围约束文本
+ * @param {string|null} recentContext    重开会话时携带的最近对话
+ * @param {string} taskSessionId         任务会话 id（main 或子会话 id），进 toolCtx 供 signal 等工具使用
  * @returns {import('./base.js').Agent}
  */
-export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerouslySkipPermissions = false, conflictWarning = null, scopeConstraint = null, recentContext = null) {
+export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerouslySkipPermissions = false, conflictWarning = null, scopeConstraint = null, recentContext = null, taskSessionId = 'main') {
   let aborted = false;
   let currentProc = null;
 
@@ -124,7 +127,7 @@ export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerou
         // key 格式："toolName:action"（signal）或 "toolName:toolName"（其他工具）
         const firedSignals = new Set();
 
-        const toolCtx = { taskId, broadcast: safeBroadcast };
+        const toolCtx = { taskId, sessionId: taskSessionId, broadcast: safeBroadcast };
 
         proc.stdout.on('data', (chunk) => {
           buffer += chunk.toString();

@@ -65,7 +65,7 @@ export function parseLine(line) {
 /**
  * 分发工具调用到对应 handler
  * @param {{ name: string, args: Record<string, string> }} tool
- * @param {{ taskId: string, broadcast: (data: object) => void }} ctx
+ * @param {{ taskId: string, sessionId: string, broadcast: (data: object) => void }} ctx
  */
 export function dispatch(tool, ctx) {
   const handler = TOOL_REGISTRY[tool.name];
