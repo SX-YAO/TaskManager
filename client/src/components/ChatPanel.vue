@@ -10,7 +10,7 @@ const props = defineProps({
   wsConnected: { type: Boolean, default: false },
   task:        { type: Object,  default: null },
   session:     { type: Object,  default: null },  // 会话对象（contextTokens / claudeSessionId 数据源）
-  sessionStatus: { type: String, default: '' },   // 会话状态（idle/running/pending/reviewing/error）
+  sessionStatus: { type: String, default: '' },   // 会话状态（idle/running/pending/reviewing/error/closed）
 });
 
 const emit = defineEmits(['send', 'stop', 'reset-context']);
@@ -34,9 +34,10 @@ watch(input, () => { nextTick(autoResize); });
 // 当前是否处于处理中（发送按钮变停止按钮）
 const isProcessing = computed(() => props.thinking || props.streaming);
 
-// 状态提示条（pending / reviewing / error）
+// 状态提示条（closed 分支放最前，优先级最高）
 const statusBar = computed(() => {
   switch (props.sessionStatus) {
+    case 'closed':    return { show: true, text: '会话已关闭 · 仅供回看，不可发送消息', icon: '🔒', cls: 'bar-closed' };
     case 'pending':   return { show: true, text: 'Agent 需要你的确认才能继续', icon: '🔔', cls: 'bar-pending' };
     case 'reviewing': return { show: true, text: '本轮产出已完成，可查看改动或继续发消息', icon: '📋', cls: 'bar-reviewing' };
     case 'error':     return { show: true, text: 'Agent 进程异常退出，发消息可重新启动', icon: '⚠️', cls: 'bar-error' };
@@ -70,7 +71,7 @@ function fmtTime(iso) {
 
 function send() {
   const content = input.value.trim();
-  if (!content || isProcessing.value) return;
+  if (!content || isProcessing.value || props.sessionStatus === 'closed') return;
   emit('send', content);
   input.value = '';
   atBottom.value = true;       // 用户主动发送，恢复跟随到底
@@ -156,7 +157,7 @@ function toolDesc({ name, input: inp }) {
 <template>
   <div class="chat-panel">
 
-    <!-- 状态提示条（pending / reviewing / error） -->
+    <!-- 状态提示条（closed / pending / reviewing / error） -->
     <div v-if="statusBar.show" class="status-bar" :class="statusBar.cls">
       <span class="bar-icon">{{ statusBar.icon }}</span>
       <span>{{ statusBar.text }}</span>
@@ -171,9 +172,11 @@ function toolDesc({ name, input: inp }) {
         <div class="empty-title">{{ wsConnected ? '连接就绪' : '连接中…' }}</div>
         <div v-if="task?.purpose" class="empty-purpose">{{ task.purpose }}</div>
         <div class="empty-hint">
-          {{ wsConnected
-            ? 'Agent 会先读取任务文件了解背景，然后开始工作'
-            : '正在建立会话连接，请稍候' }}
+          {{ sessionStatus === 'closed'
+            ? '会话已关闭，以下为历史记录'
+            : (wsConnected
+              ? 'Agent 会先读取任务文件了解背景，然后开始工作'
+              : '正在建立会话连接，请稍候') }}
         </div>
       </div>
 
@@ -252,29 +255,29 @@ function toolDesc({ name, input: inp }) {
         :title="`上下文占用 ${contextPercent}%`"
       >上下文 {{ contextPercent }}%</span>
       <button
-        v-if="session?.claudeSessionId && !isProcessing"
+        v-if="session?.claudeSessionId && !isProcessing && sessionStatus !== 'closed'"
         class="reset-ctx-btn"
         title="放弃当前会话，下次发消息开新会话并读取任务文件恢复上下文"
         @click="resetContext"
       >↻ 重开会话</button>
     </div>
 
-    <!-- 输入区 -->
+    <!-- 输入区（closed 会话只读：禁用输入、隐藏发送/停止按钮） -->
     <div class="input-wrap" :class="{ 'input-pending': sessionStatus === 'pending' }">
       <textarea
         ref="textareaEl"
         v-model="input"
         :placeholder="sessionStatus === 'pending' ? '回复 Agent，按 Enter 发送…' : '输入消息，Enter 发送，Shift+Enter 换行…'"
         rows="1"
-        :disabled="isProcessing"
+        :disabled="isProcessing || sessionStatus === 'closed'"
         @keydown="onKeydown"
       ></textarea>
 
       <!-- 发送 / 停止 按钮切换 -->
-      <button v-if="!isProcessing" class="send-btn" :disabled="!input.trim()" @click="send">
+      <button v-if="sessionStatus !== 'closed' && !isProcessing" class="send-btn" :disabled="!input.trim()" @click="send">
         ↑
       </button>
-      <button v-else class="stop-btn" title="停止当前 Agent" @click="stop">
+      <button v-else-if="sessionStatus !== 'closed'" class="stop-btn" title="停止当前 Agent" @click="stop">
         ■
       </button>
     </div>
@@ -410,6 +413,7 @@ function toolDesc({ name, input: inp }) {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
 .bar-icon { font-size: 14px; line-height: 1; }
+.bar-closed    { background: rgba(90,90,120,.08); border-bottom: 1px solid var(--border); color: #5a5a78; }
 .bar-pending   { background: rgba(245,159,0,.08); border-bottom: 1px solid rgba(245,159,0,.15); color: #c17700; }
 .bar-reviewing { background: rgba(59,130,246,.07); border-bottom: 1px solid rgba(59,130,246,.12); color: #3b7dd8; }
 .bar-error     { background: rgba(224,49,49,.07);  border-bottom: 1px solid rgba(224,49,49,.12);  color: #c03030; }
