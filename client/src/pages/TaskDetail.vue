@@ -6,6 +6,7 @@ import { useTheme } from '../composables/useTheme.js';
 const { theme, toggle: toggleTheme } = useTheme();
 import { http } from '../api/http.js';
 import ChatPane from '../components/ChatPane.vue';
+import SessionTabBar from '../components/SessionTabBar.vue';
 import InfoPanel from '../components/InfoPanel.vue';
 import OutputPanel from '../components/OutputPanel.vue';
 
@@ -54,6 +55,39 @@ function onPaneDone() {
 
 // Task 8/10 用：切换某 pane 显示的会话
 async function switchPane(paneIdx, sessionId) { /* Task 10 实现 */ }
+
+// ── SessionTabBar 事件（Task 8）──
+
+// 单击标签：把聚焦 pane（单栏时即最后一个 pane）切到该会话；closed 会话也可打开回看
+async function onSelectSession(sessionId) {
+  if (panes.value.includes(sessionId)) return;      // 已打开
+  panes.value[panes.value.length - 1] = sessionId;  // 替换聚焦 pane
+  await nextTick();
+  // 旧 ChatPane 已随 key 变化卸载（其 onUnmounted 自动断 WS），这里只初始化新 pane
+  const p = paneRefs.value[panes.value.length - 1];
+  await p.loadHistory(); p.connect();
+}
+
+// 新建会话（name 可空，服务端默认命名），创建后立即切过去
+async function onCreateSession(name) {
+  const s = await http.createSession(props.id, name);
+  sessions.value.push(s);
+  await onSelectSession(s.id);
+}
+
+// 关闭子会话：closed 标签灰显删除线；pane 若开着则保留回看（只读由 Task 9 实现）
+async function onCloseSession(sessionId) {
+  const updated = await http.closeSession(props.id, sessionId);
+  const idx = sessions.value.findIndex(s => s.id === sessionId);
+  if (idx !== -1) sessions.value[idx] = updated;
+}
+
+// 双击改名
+async function onRenameSession(sessionId, name) {
+  const updated = await http.renameSession(props.id, sessionId, name);
+  const idx = sessions.value.findIndex(s => s.id === sessionId);
+  if (idx !== -1) sessions.value[idx].name = updated.name;
+}
 
 // 拖拽状态
 let startX = 0;
@@ -135,6 +169,12 @@ onUnmounted(() => {
         {{ theme === 'dark' ? '☀️' : '🌙' }}
       </button>
     </header>
+
+    <SessionTabBar
+      :sessions="sessions" :panes="panes"
+      @select="onSelectSession" @create="onCreateSession"
+      @close="onCloseSession" @rename="onRenameSession"
+    />
 
     <div class="detail-body">
       <ChatPane
