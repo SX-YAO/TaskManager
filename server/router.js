@@ -17,9 +17,10 @@ const execFileAsync = promisify(execFile);
 const router = Router();
 
 // ─── Claude 配置相关常量 ───────────────────────────────────────
-const CLAUDE_SETTINGS_FILE = path.join(os.homedir(), '.claude', 'settings.json');
-const CLAUDE_PLUGINS_DIR   = path.join(os.homedir(), '.claude', 'plugins', 'cache');
-const REQUIRED_PERM        = 'Write(.task-manager/**)';
+const CLAUDE_SETTINGS_FILE    = path.join(os.homedir(), '.claude', 'settings.json');
+const CLAUDE_PLUGINS_DIR      = path.join(os.homedir(), '.claude', 'plugins', 'cache');
+const CLAUDE_INSTALLED_FILE   = path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json');
+const REQUIRED_PERM           = 'Write(.task-manager/**)';
 
 function readClaudeSettings() {
   if (!fs.existsSync(CLAUDE_SETTINGS_FILE)) return {};
@@ -561,70 +562,131 @@ router.get('/claude/settings', (_req, res) => {
   });
 });
 
-// 插件列表（扫描 ~/.claude/plugins/cache/）
+// ── 已安装插件定位 ─────────────────────────────────────────────
+// 实际目录结构：cache/<marketplace>/<plugin>/<version>/，元数据在 .claude-plugin/plugin.json。
+// 权威清单为 installed_plugins.json（记录每个插件的 installPath/version），
+// 扫描 cache 仅作兜底（如清单缺失或损坏）。
+
+function readJsonSafe(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf-8')); }
+  catch { return null; }
+}
+
+/** 从 installed_plugins.json 解析出安装记录 [{installPath, version, scope}] */
+function listInstalledFromManifest() {
+  const data = readJsonSafe(CLAUDE_INSTALLED_FILE);
+  if (!data?.plugins || typeof data.plugins !== 'object') return [];
+  const installs = [];
+  for (const entries of Object.values(data.plugins)) {
+    if (!Array.isArray(entries)) continue;
+    for (const e of entries) {
+      if (e?.installPath && fs.existsSync(e.installPath)) installs.push(e);
+    }
+  }
+  return installs;
+}
+
+/** 兜底：扫描 cache/<marketplace>/<plugin>/<version>/，每个插件取最新版本目录 */
+function scanPluginDirsFromCache() {
+  if (!fs.existsSync(CLAUDE_PLUGINS_DIR)) return [];
+  const installs = [];
+  for (const marketplace of fs.readdirSync(CLAUDE_PLUGINS_DIR, { withFileTypes: true })) {
+    if (!marketplace.isDirectory()) continue;
+    const mDir = path.join(CLAUDE_PLUGINS_DIR, marketplace.name);
+    for (const plugin of fs.readdirSync(mDir, { withFileTypes: true })) {
+      if (!plugin.isDirectory()) continue;
+      const pDir = path.join(mDir, plugin.name);
+      const versions = fs.readdirSync(pDir, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => d.name)
+        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true })); // 版本号降序
+      if (versions.length) {
+        installs.push({ installPath: path.join(pDir, versions[0]), version: versions[0] });
+      }
+    }
+  }
+  return installs;
+}
+
+/** 解析单个插件目录 → { name, version, description, source, skillCount, dir } */
+function describePluginDir(dir, manifestVersion) {
+  const meta = readJsonSafe(path.join(dir, '.claude-plugin', 'plugin.json')) ?? {};
+  const skillsDir = path.join(dir, 'skills');
+  // 技能为目录结构：skills/<skillName>/SKILL.md；兼容旧式平铺 skills/*.md
+  let skillCount = 0;
+  if (fs.existsSync(skillsDir)) {
+    skillCount = fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && fs.existsSync(path.join(skillsDir, d.name, 'SKILL.md')))
+      .length
+      + fs.readdirSync(skillsDir).filter(f => f.endsWith('.md') && f !== 'SKILL.md').length;
+  }
+  return {
+    name: meta.name ?? path.basename(path.dirname(dir)),
+    version: meta.version ?? manifestVersion ?? '',
+    description: meta.description ?? '',
+    source: meta.repository?.url ?? meta.homepage ?? '',
+    skillCount,
+    dir,
+  };
+}
+
+/** 所有已安装插件（清单优先，cache 扫描兜底） */
+function listInstalledPlugins() {
+  let installs = listInstalledFromManifest();
+  if (!installs.length) installs = scanPluginDirsFromCache();
+  return installs.map(e => describePluginDir(e.installPath, e.version));
+}
+
+// 插件列表（含技能计数）
 router.get('/claude/plugins', (_req, res) => {
-  if (!fs.existsSync(CLAUDE_PLUGINS_DIR)) return res.json([]);
-
-  const plugins = fs.readdirSync(CLAUDE_PLUGINS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => {
-      const dir = path.join(CLAUDE_PLUGINS_DIR, d.name);
-      let name = d.name, version = '', source = '';
-      try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8'));
-        name    = pkg.name    ?? d.name;
-        version = pkg.version ?? '';
-        source  = pkg.repository?.url ?? pkg.homepage ?? '';
-      } catch { /* package.json 不存在，使用目录名 */ }
-
-      const skillsDir  = path.join(dir, 'skills');
-      const skillCount = fs.existsSync(skillsDir)
-        ? fs.readdirSync(skillsDir).filter(f => f.endsWith('.md')).length
-        : 0;
-
-      return { name, version, source, skillCount, enabled: true };
-    });
-
-  res.json(plugins);
+  res.json(listInstalledPlugins().map(({ dir, ...p }) => ({ ...p, enabled: true })));
 });
 
-// 技能列表（合并所有插件的 skills/*.md，平铺展示）
+// 技能列表（遍历插件 skills/<name>/SKILL.md，解析 frontmatter 描述）
 router.get('/claude/skills', (_req, res) => {
-  if (!fs.existsSync(CLAUDE_PLUGINS_DIR)) return res.json([]);
-
   const skills = [];
-  const pluginDirs = fs.readdirSync(CLAUDE_PLUGINS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => path.join(CLAUDE_PLUGINS_DIR, d.name));
 
-  for (const dir of pluginDirs) {
-    const skillsDir = path.join(dir, 'skills');
+  for (const plugin of listInstalledPlugins()) {
+    const skillsDir = path.join(plugin.dir, 'skills');
     if (!fs.existsSync(skillsDir)) continue;
 
-    const files = fs.readdirSync(skillsDir).filter(f => f.endsWith('.md'));
-    for (const file of files) {
-      const name = file.replace(/\.md$/, '');
-      let description = '';
-      try {
-        const content = fs.readFileSync(path.join(skillsDir, file), 'utf-8');
-        // 尝试从 YAML frontmatter 取 description
-        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-        if (fmMatch) {
-          const descLine = fmMatch[1].split('\n').find(l => l.startsWith('description:'));
-          if (descLine) description = descLine.replace('description:', '').trim();
-        }
-        // fallback：取正文第一段非空行
-        if (!description) {
-          const body = content.replace(/^---[\s\S]*?---\n/, '').trim();
-          description = body.split('\n').find(l => l.trim() && !l.startsWith('#')) ?? '';
-        }
-      } catch { /* 读取失败跳过 */ }
-      skills.push({ name, description });
+    // 新式：skills/<skillName>/SKILL.md
+    for (const d of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      const file = path.join(skillsDir, d.name, 'SKILL.md');
+      if (!fs.existsSync(file)) continue;
+      skills.push({ name: d.name, description: readSkillDescription(file), plugin: plugin.name });
+    }
+    // 兼容旧式平铺：skills/*.md
+    for (const f of fs.readdirSync(skillsDir).filter(f => f.endsWith('.md') && f !== 'SKILL.md')) {
+      skills.push({
+        name: f.replace(/\.md$/, ''),
+        description: readSkillDescription(path.join(skillsDir, f)),
+        plugin: plugin.name,
+      });
     }
   }
 
   res.json(skills);
 });
+
+/** 从 SKILL.md 提取描述：优先 YAML frontmatter 的 description，fallback 正文首个非标题行 */
+function readSkillDescription(file) {
+  try {
+    const content = fs.readFileSync(file, 'utf-8');
+    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const descLine = fmMatch[1].split('\n').find(l => l.startsWith('description:'));
+      if (descLine) {
+        const v = descLine.replace('description:', '').trim();
+        // frontmatter 值可能带 YAML 引号，剥掉
+        return v.replace(/^["']|["']$/g, '');
+      }
+    }
+    const body = content.replace(/^---[\s\S]*?---\n/, '').trim();
+    return body.split('\n').find(l => l.trim() && !l.startsWith('#'))?.trim() ?? '';
+  } catch { return ''; }
+}
 
 // 一键添加权限到 permissions.allow
 router.post('/claude/permissions/allow', (req, res) => {
