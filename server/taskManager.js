@@ -4,6 +4,9 @@ import {
   deleteTaskFiles, archiveTaskFiles, migrateLegacyMessages,
 } from './storage.js';
 
+// re-export：signal 等工具需要读聚合态时的原始 meta
+export { readMeta } from './storage.js';
+
 export function createTask({ title, projectDir, purpose, agentType = 'claude',
                              dangerouslySkipPermissions = false,
                              scopeEnabled = false, watchedRepos = [] }) {

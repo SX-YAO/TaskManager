@@ -7,7 +7,7 @@
  * 协议详情见 PROTOCOL.md
  */
 
-import { updateTaskStatus } from '../taskManager.js';
+import { updateSessionStatus, readMeta } from '../taskManager.js';
 
 export default {
   name: 'signal',
@@ -39,18 +39,30 @@ export default {
   /**
    * 处理器
    * @param {{ action: string, reason?: string, has_output?: string }} args
-   * @param {{ taskId: string, broadcast: (data: object) => void }} ctx
+   * @param {{ taskId: string, sessionId: string, broadcast: (data: object) => void }} ctx
    */
-  handle(args, { taskId, broadcast }) {
+  handle(args, { taskId, sessionId, broadcast }) {
     const { action, reason, has_output } = args;
+
+    const notify = (status, extra = {}) => {
+      broadcast({ type: 'session_status_change', sessionId, status, ...extra });
+      // 聚合态：任一 running → running，否则任一 pending → pending，
+      // 否则任一 reviewing → reviewing，否则主会话状态
+      const sessions = readMeta(taskId).sessions ?? [];
+      const agg = sessions.some(s => s.status === 'running') ? 'running'
+        : sessions.some(s => s.status === 'pending') ? 'pending'
+        : sessions.some(s => s.status === 'reviewing') ? 'reviewing'
+        : sessions.find(s => s.isMain)?.status ?? 'idle';
+      broadcast({ type: 'status_change', status: agg });
+    };
 
     if (action === 'need_confirm') {
       if (!reason) {
         console.warn('[tool:signal] need_confirm 缺少 reason 参数，已忽略');
         return;
       }
-      updateTaskStatus(taskId, 'pending');
-      broadcast({ type: 'status_change', status: 'pending', reason });
+      updateSessionStatus(taskId, sessionId, 'pending');
+      notify('pending', { reason });
       return;
     }
 
@@ -60,9 +72,9 @@ export default {
         return;
       }
       // 任务一旦运行过就不再回到 idle（idle 是出生态，不是返回态）
-      // has_output 只影响前端状态提示条（有/无产出），任务状态统一 reviewing
-      updateTaskStatus(taskId, 'reviewing');
-      broadcast({ type: 'status_change', status: 'reviewing', hasOutput: has_output === 'true' });
+      // has_output 只影响前端状态提示条（有/无产出），会话状态统一 reviewing
+      updateSessionStatus(taskId, sessionId, 'reviewing');
+      notify('reviewing', { hasOutput: has_output === 'true' });
       return;
     }
 
