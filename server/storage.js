@@ -103,6 +103,13 @@ export function initTaskFiles(taskId, { title, projectDir, purpose, agentType = 
     createdAt: new Date().toISOString(),
     // 运行态字段（可变，但不同步内容文件）
     status: 'idle',
+    sessions: [{
+      id: 'main', name: '主会话', isMain: true,
+      status: 'idle',
+      claudeSessionId: null, contextTokens: null, contextWindow: null,
+      sessionHistory: [],
+      createdAt: new Date().toISOString(), closedAt: null,
+    }],
     claudeSessionId: null,
     archivedAt: null,
     // 改动范围：统一列表，AI 声明与用户手动添加共用同一数组
