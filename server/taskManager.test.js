@@ -45,7 +45,7 @@ test('closeSession：主会话拒绝，子会话可关闭', () => {
   assert.ok(closed.closedAt);
 });
 
-test('aggregateStatus：任一 running → running，否则取主会话', () => {
+test('aggregateStatus：优先级聚合 running > pending > reviewing > 主会话', () => {
   const meta = readMeta(taskId);
   // 当前无 running → 主会话 idle
   assert.equal(tm.aggregateStatus(meta), 'idle');
@@ -53,7 +53,11 @@ test('aggregateStatus：任一 running → running，否则取主会话', () => 
   tm.updateSessionStatus(taskId, sub.id, 'running');
   assert.equal(tm.aggregateStatus(readMeta(taskId)), 'running');
   tm.updateSessionStatus(taskId, sub.id, 'reviewing');
-  // closed 会话的 running 不算（构造场景）
+  // 新规则分歧场景：main idle + 子会话 pending → pending（旧规则会得 idle）
+  tm.updateSessionStatus(taskId, sub.id, 'pending');
+  assert.equal(tm.aggregateStatus(readMeta(taskId)), 'pending');
+  // 还原：子会话 reviewing、主会话 pending
+  tm.updateSessionStatus(taskId, sub.id, 'reviewing');
   tm.updateSessionStatus(taskId, 'main', 'pending');
   assert.equal(tm.aggregateStatus(readMeta(taskId)), 'pending');
 });

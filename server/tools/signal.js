@@ -7,7 +7,7 @@
  * 协议详情见 PROTOCOL.md
  */
 
-import { updateSessionStatus, readMeta } from '../taskManager.js';
+import { updateSessionStatus, readMeta, aggregateStatus } from '../taskManager.js';
 
 export default {
   name: 'signal',
@@ -46,14 +46,8 @@ export default {
 
     const notify = (status, extra = {}) => {
       broadcast({ type: 'session_status_change', sessionId, status, ...extra });
-      // 聚合态：任一 running → running，否则任一 pending → pending，
-      // 否则任一 reviewing → reviewing，否则主会话状态
-      const sessions = readMeta(taskId).sessions ?? [];
-      const agg = sessions.some(s => s.status === 'running') ? 'running'
-        : sessions.some(s => s.status === 'pending') ? 'pending'
-        : sessions.some(s => s.status === 'reviewing') ? 'reviewing'
-        : sessions.find(s => s.isMain)?.status ?? 'idle';
-      broadcast({ type: 'status_change', status: agg });
+      // 聚合态统一走 taskManager.aggregateStatus（与 runtime/router 行为一致）
+      broadcast({ type: 'status_change', status: aggregateStatus(readMeta(taskId)) });
     };
 
     if (action === 'need_confirm') {

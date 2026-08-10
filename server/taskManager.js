@@ -129,10 +129,12 @@ export function setSessionSid(taskId, sessionId, sid, contextTokens, contextWind
   });
 }
 
-// 聚合状态：任一非 closed 会话 running → running；否则主会话状态
+// 聚合状态（优先级，非 closed 会话参与）：running > pending > reviewing > 主会话状态
 export function aggregateStatus(meta) {
-  const sessions = meta.sessions ?? [];
+  const sessions = (meta.sessions ?? []).filter(s => s.status !== 'closed');
   if (sessions.some(s => s.status === 'running')) return 'running';
+  if (sessions.some(s => s.status === 'pending')) return 'pending';
+  if (sessions.some(s => s.status === 'reviewing')) return 'reviewing';
   return sessions.find(s => s.isMain)?.status ?? meta.status ?? 'idle';
 }
 
