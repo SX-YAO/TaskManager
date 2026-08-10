@@ -103,8 +103,8 @@ async function init() {
 }
 
 onMounted(init);
+// WS 断开在 ChatPane 内部 onUnmounted 处理（模板 ref 清空早于父级 onUnmounted，这里拿不到 paneRefs）
 onUnmounted(() => {
-  paneRefs.value.forEach(p => p.close());
   stopResize();
 });
 </script>

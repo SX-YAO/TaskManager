@@ -1,5 +1,5 @@
 <script setup>
-import { toRef } from 'vue';
+import { toRef, onUnmounted } from 'vue';
 import { useSessionChat } from '../composables/useSessionChat.js';
 import ChatPanel from './ChatPanel.vue';
 
@@ -21,6 +21,9 @@ const {
 
 // 生命周期由父组件统一控制：TaskDetail onMounted 后逐个 loadHistory() + connect()
 defineExpose({ loadHistory, connect, close, send, wsConnected });
+
+// 卸载时断开 WS（闭包持有 socket；不能靠父级 paneRefs——模板 ref 清空早于父级 onUnmounted）
+onUnmounted(() => close());
 </script>
 
 <template>

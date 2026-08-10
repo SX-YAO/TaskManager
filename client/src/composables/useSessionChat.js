@@ -78,8 +78,9 @@ export function useSessionChat(taskId, sessionRef, taskRef, hooks = {}) {
     });
 
     // AI 声明改动范围后，刷新 task 的 watchedRepos
+    // Object.assign 改共享响应式对象（整对象替换只改本地 props ref，父级不生效）
     socket.on('repos_updated', async () => {
-      try { taskRef.value = await http.getTask(taskId); } catch { /* 忽略 */ }
+      try { Object.assign(taskRef.value, await http.getTask(taskId)); } catch { /* 忽略 */ }
     });
 
     socket.on('error', ({ message: errMsg }) => {
@@ -107,7 +108,7 @@ export function useSessionChat(taskId, sessionRef, taskRef, hooks = {}) {
         role: 'assistant', content: `🔄 ${message}`,
         timestamp: new Date().toISOString(), toolCalls: [],
       });
-      try { taskRef.value = await http.getTask(taskId); } catch { /* 忽略 */ }
+      try { Object.assign(taskRef.value, await http.getTask(taskId)); } catch { /* 忽略 */ }
     });
 
     // 旧 interrupted 事件兼容（服务端已改为 session_status_change，保留兜底）
