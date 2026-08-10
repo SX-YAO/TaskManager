@@ -170,6 +170,10 @@ router.patch('/tasks/:id/sessions/:sid', (req, res) => {
 // 关闭会话：运行中的先走完整 stop 流程（杀 agent + 保存部分内容）；主会话拒绝
 router.post('/tasks/:id/sessions/:sid/close', (req, res) => {
   try {
+    // 先做主会话拒绝，再产生任何副作用（杀 agent/落盘），避免被拒绝的请求留下痕迹
+    if (getSession(req.params.id, req.params.sid).isMain) {
+      return res.status(400).json({ error: '主会话不可关闭' });
+    }
     const rt = stopRuntime(req.params.id, req.params.sid);
     if (rt) {
       // 与 WS stop 流程一致：部分内容以 interrupted 落盘，避免丢消息
