@@ -31,9 +31,10 @@ export function useSessionChat(taskId, sessionRef, taskRef, hooks = {}) {
       : { type: 'sub', sessionId: sessionRef.value.id };
     socket = createTaskSocket(taskId, desc);
 
-    // 服务端确认连接
-    socket.on('connected', () => {
+    // 服务端确认连接（携带持久化的最新会话状态，纠正本地 stale 状态）
+    socket.on('connected', (msg) => {
       wsConnected.value = true;
+      if (msg.status) sessionRef.value.status = msg.status;
       // 重连到正在运行的会话：显示 loading，等待服务端补发的 chunk
       if (sessionRef.value.status === 'running') thinking.value = true;
       // 仅主会话保留「新任务自动发 purpose」行为

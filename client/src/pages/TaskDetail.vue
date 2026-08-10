@@ -92,6 +92,8 @@ async function initPane(sid) {
 
 // 单击标签：把聚焦 pane（单栏时即最后一个 pane）切到该会话；closed 会话也可打开回看
 async function onSelectSession(sessionId) {
+  // 切换前刷新全量会话状态（后台完成的会话可能已 stale，标签点也随之纠正）
+  try { sessions.value = await http.getSessions(props.id); } catch { /* 忽略 */ }
   if (panes.value.includes(sessionId)) return;      // 已打开
   panes.value[panes.value.length - 1] = sessionId;  // 替换聚焦 pane
   persistPanes();

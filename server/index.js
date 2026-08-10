@@ -57,7 +57,7 @@ wss.on('connection', (ws, req) => {
 
   const rt = getRuntime(taskId, sessionId);
   rt.listeners.add(ws);
-  ws.send(JSON.stringify({ type: 'connected', taskId, sessionId }));
+  ws.send(JSON.stringify({ type: 'connected', taskId, sessionId, status: session.status }));
 
   // 重连补发
   if (rt.processing) {
