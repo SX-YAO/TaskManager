@@ -39,6 +39,14 @@ export const http = {
   archiveTask: (id)             => request('PATCH',  `/tasks/${id}/archive`),
   deleteTask:  (id)             => request('DELETE', `/tasks/${id}`),
   resetContext:(id)             => request('POST',   `/tasks/${id}/reset-context`),
+
+  // 会话管理（1vN）
+  getSessions:         (id)             => request('GET',    `/tasks/${id}/sessions`),
+  createSession:       (id, name)       => request('POST',   `/tasks/${id}/sessions`, name ? { name } : {}),
+  renameSession:       (id, sid, name)  => request('PATCH',  `/tasks/${id}/sessions/${sid}`, { name }),
+  closeSession:        (id, sid)        => request('POST',   `/tasks/${id}/sessions/${sid}/close`),
+  getSessionMessages:  (id, sid)        => request('GET',    `/tasks/${id}/sessions/${sid}/messages`),
+  resetSessionContext: (id, sid)        => request('POST',   `/tasks/${id}/sessions/${sid}/reset-context`),
   pickDirectory:  ()            => request('GET',    '/pick-directory'),
   getBranches:    (repoPath)    => request('GET',    `/git/branches?path=${encodeURIComponent(repoPath)}`),
   shutdown:    ()               => request('POST',   '/shutdown'),

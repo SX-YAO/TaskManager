@@ -1,10 +1,13 @@
 /**
- * 创建任务 WebSocket 连接封装
+ * 创建任务会话 WebSocket 连接封装
  * @param {string} taskId
- * @returns {{ on(event:string, cb:Function):void, send(data:object):void, close():void }}
+ * @param {{ type: 'main' } | { type: 'sub', sessionId: string }} session
  */
-export function createTaskSocket(taskId) {
-  const ws = new WebSocket(`ws://${location.host}/ws?taskId=${taskId}`);
+export function createTaskSocket(taskId, session) {
+  const qs = session.type === 'main'
+    ? `taskId=${taskId}&type=main`
+    : `taskId=${taskId}&type=sub&sessionId=${session.sessionId}`;
+  const ws = new WebSocket(`ws://${location.host}/ws?${qs}`);
   const listeners = {};
 
   ws.onmessage = (e) => {
