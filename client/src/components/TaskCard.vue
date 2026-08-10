@@ -1,10 +1,18 @@
 <script setup>
+import { computed } from 'vue';
 import Popover from './Popover.vue';
 
-defineProps({
+const props = defineProps({
   task: { type: Object, required: true },
 });
 defineEmits(['delete']);
+
+// 会话角标统计：running 数与总会话数（兼容无 sessions 的旧数据）
+const sessionStats = computed(() => {
+  const ss = props.task.sessions ?? [];
+  const running = ss.filter(s => s.status === 'running').length;
+  return { total: ss.length, running };
+});
 
 const STATUS = {
   idle:      { label: '未运行',   color: '#444',    dot: '#333' },
@@ -76,6 +84,12 @@ function fmtTime(iso) {
       <span>📁 {{ dirName(task.projectDir) }}</span>
       <span>🤖 {{ task.agentType }}</span>
       <span>🕐 {{ fmtTime(task.createdAt) }}</span>
+    </div>
+
+    <!-- 会话角标：有运行中会话或多会话时显示 -->
+    <div class="card-sessions">
+      <span v-if="sessionStats.running" class="sess-badge running">● {{ sessionStats.running }} 运行中</span>
+      <span v-if="sessionStats.total > 1" class="sess-badge total">{{ sessionStats.total }} 会话</span>
     </div>
 
     <!-- 底部提示区：有提示时显示内容，无提示时占位保持高度一致 -->
@@ -187,6 +201,12 @@ function fmtTime(iso) {
 
 .card-meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
 .card-meta span { display: flex; align-items: center; gap: 6px; }
+
+/* ── 会话角标 ── */
+.card-sessions { display: flex; gap: 6px; margin-top: 8px; }
+.sess-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+.sess-badge.running { background: rgba(64,192,87,.1); color: #40c057; }
+.sess-badge.total   { background: rgba(59,91,219,.12); color: #7b8cde; }
 
 /* ── 底部提示区：note 或空白占位，保持高度一致 ── */
 .card-note-area { margin-top: 8px; }
