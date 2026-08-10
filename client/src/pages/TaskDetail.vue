@@ -15,11 +15,38 @@ const router = useRouter();
 
 const task     = ref(null);
 const sessions = ref([]);          // Session[]（会话级数据源，ChatPane 直接改 status）
-const panes    = ref(['main']);    // 打开的 sessionId 数组（Task 10 扩展为最多 2 个分屏）
-const paneRefs = ref([]);          // ChatPane expose 的实例（loadHistory/connect/close/...）
+const panes    = ref(['main']);    // 打开的 sessionId 数组（最多 2 个分屏）
+// sessionId → ChatPane expose 实例（v-for 多模板 ref 顺序不被保证，改用函数 ref 建 Map）
+const paneRefs = new Map();
+function setPaneRef(sid, el) {
+  if (el) paneRefs.set(sid, el);
+  else    paneRefs.delete(sid);
+}
 
-// header 连接状态点：取主 pane 的 wsConnected
-const wsConnected = computed(() => paneRefs.value[0]?.wsConnected ?? false);
+// header 连接状态点：取首个 pane 的 wsConnected（expose 的 ref 经 proxyRefs 已解包）
+const wsConnected = computed(() => paneRefs.get(panes.value[0])?.wsConnected ?? false);
+
+// ── 分屏状态 ──
+const draggingSession = ref(null);   // 拖拽中的 sessionId（拖拽时显示落区）
+const splitRatio      = ref(0.5);    // 左栏占比（0.25 ~ 0.75）
+
+// 布局持久化：sessionStorage['taskPanes:' + taskId] = { panes, ratio }
+function persistPanes() {
+  sessionStorage.setItem(`taskPanes:${props.id}`,
+    JSON.stringify({ panes: panes.value, ratio: splitRatio.value }));
+}
+
+// 恢复上次分屏布局（过滤已不存在的会话）；关页签后 sessionStorage 自动失效
+function restorePanes() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`taskPanes:${props.id}`) ?? 'null');
+    if (saved?.panes?.length) {
+      const valid = saved.panes.filter(sid => sessions.value.some(s => s.id === sid));
+      if (valid.length) panes.value = valid.slice(0, 2);
+      if (saved.ratio) splitRatio.value = Math.min(0.75, Math.max(0.25, saved.ratio));
+    }
+  } catch { /* 忽略损坏的持久化数据 */ }
+}
 
 // 面板宽度
 const infoPanelWidth  = ref(280);
@@ -53,19 +80,22 @@ function onPaneDone() {
   if (showOutput.value) outputRefresh.value++;
 }
 
-// Task 8/10 用：切换某 pane 显示的会话
-async function switchPane(paneIdx, sessionId) { /* Task 10 实现 */ }
-
 // ── SessionTabBar 事件（Task 8）──
+
+// 初始化新出现的 pane：加载历史 + 连接 WS（已连接过的不重复 connect）
+async function initPane(sid) {
+  const p = paneRefs.get(sid);
+  if (p && !p.wsConnected) { await p.loadHistory(); p.connect(); }
+}
 
 // 单击标签：把聚焦 pane（单栏时即最后一个 pane）切到该会话；closed 会话也可打开回看
 async function onSelectSession(sessionId) {
   if (panes.value.includes(sessionId)) return;      // 已打开
   panes.value[panes.value.length - 1] = sessionId;  // 替换聚焦 pane
+  persistPanes();
   await nextTick();
   // 旧 ChatPane 已随 key 变化卸载（其 onUnmounted 自动断 WS），这里只初始化新 pane
-  const p = paneRefs.value[panes.value.length - 1];
-  await p.loadHistory(); p.connect();
+  await initPane(sessionId);
 }
 
 // 新建会话（name 可空，服务端默认命名），创建后立即切过去
@@ -87,6 +117,38 @@ async function onRenameSession(sessionId, name) {
   const updated = await http.renameSession(props.id, sessionId, name);
   const idx = sessions.value.findIndex(s => s.id === sessionId);
   if (idx !== -1) sessions.value[idx].name = updated.name;
+}
+
+// ── 拖拽分屏（Task 10）──
+
+function onDragStart(sessionId) { draggingSession.value = sessionId; }
+function onDragEnd() { draggingSession.value = null; }
+
+// 落区 drop：side = 0（左）| 1（右）
+async function onDrop(side) {
+  const sid = draggingSession.value;
+  draggingSession.value = null;
+  if (!sid) return;
+  const existing = panes.value.indexOf(sid);
+  if (existing !== -1) {
+    if (existing === side) return;     // 拖到已含该会话的一侧：no-op
+    panes.value.reverse();             // 已打开标签拖到另一侧：交换
+  } else if (panes.value.length === 1) {
+    panes.value = side === 0 ? [sid, panes.value[0]] : [panes.value[0], sid];
+  } else {
+    panes.value[side] = sid;           // 双栏时拖到某侧：替换该侧
+  }
+  persistPanes();
+  await nextTick();
+  // 交换场景下两侧 pane 均未卸载且已连接，initPane 内部会跳过
+  await initPane(sid);
+}
+
+// pane 头 ✕：合并回单栏（被移除的 ChatPane 卸载时自动断 WS）
+function onMerge(paneIdx) {
+  if (panes.value.length <= 1) return;
+  panes.value.splice(paneIdx, 1);
+  persistPanes();
 }
 
 // 拖拽状态
@@ -119,16 +181,44 @@ function stopResize() {
   resizingPanel = null;
 }
 
+// 分屏分隔条拖拽（复用面板拖拽模式，范围 0.25 ~ 0.75）
+const chatAreaRef = ref(null);
+let splitStartX = 0;
+let splitStartRatio = 0.5;
+let splitAreaWidth = 1;
+
+function startSplitResize(e) {
+  splitStartX = e.clientX;
+  splitStartRatio = splitRatio.value;
+  splitAreaWidth = chatAreaRef.value?.getBoundingClientRect().width || 1;
+  document.body.style.userSelect = 'none';
+  document.addEventListener('mousemove', onSplitResize);
+  document.addEventListener('mouseup', stopSplitResize);
+}
+
+function onSplitResize(e) {
+  splitRatio.value = Math.min(0.75, Math.max(0.25,
+    splitStartRatio + (e.clientX - splitStartX) / splitAreaWidth));
+}
+
+function stopSplitResize() {
+  document.body.style.userSelect = '';
+  document.removeEventListener('mousemove', onSplitResize);
+  document.removeEventListener('mouseup', stopSplitResize);
+  persistPanes();
+}
+
 
 async function init() {
   try {
     task.value = await http.getTask(props.id);
     sessions.value = task.value.sessions ?? [];
+    restorePanes();          // 恢复上次分屏布局（需在 nextTick 前设置 panes）
     await nextTick();
     // 加载历史 + 连接每个打开的 pane
-    for (const p of paneRefs.value) {
-      await p.loadHistory();
-      p.connect();
+    for (const sid of panes.value) {
+      const p = paneRefs.get(sid);
+      if (p) { await p.loadHistory(); p.connect(); }
     }
   } catch (e) {
     console.error('加载任务失败:', e);
@@ -140,6 +230,7 @@ onMounted(init);
 // WS 断开在 ChatPane 内部 onUnmounted 处理（模板 ref 清空早于父级 onUnmounted，这里拿不到 paneRefs）
 onUnmounted(() => {
   stopResize();
+  stopSplitResize();
 });
 </script>
 
@@ -174,18 +265,35 @@ onUnmounted(() => {
       :sessions="sessions" :panes="panes"
       @select="onSelectSession" @create="onCreateSession"
       @close="onCloseSession" @rename="onRenameSession"
+      @dragstart="onDragStart" @dragend="onDragEnd"
     />
 
     <div class="detail-body">
-      <ChatPane
-        v-for="(sid, i) in panes" :key="sid"
-        ref="paneRefs"
-        :task-id="id"
-        :session="sessions.find(s => s.id === sid) ?? {}"
-        :task="task"
-        :split="panes.length > 1"
-        @done="onPaneDone"
-      />
+      <div ref="chatAreaRef" class="chat-area">
+        <template v-for="(sid, i) in panes" :key="sid">
+          <div v-if="i > 0" class="pane-divider" @mousedown="startSplitResize"></div>
+          <ChatPane
+            :ref="el => setPaneRef(sid, el)"
+            :style="panes.length > 1 ? { flex: i === 0 ? splitRatio : 1 - splitRatio } : {}"
+            :task-id="id"
+            :session="sessions.find(s => s.id === sid) ?? {}"
+            :task="task"
+            :split="panes.length > 1"
+            @merge="onMerge(i)"
+            @done="onPaneDone"
+          />
+        </template>
+
+        <!-- 拖拽落区（仅拖拽中显示）：左半 / 右半 -->
+        <div v-if="draggingSession" class="drop-overlay">
+          <div class="dropzone" @dragover.prevent @drop="onDrop(0)">
+            <span>⇤ 在左侧打开「{{ sessions.find(s => s.id === draggingSession)?.name }}」</span>
+          </div>
+          <div class="dropzone" @dragover.prevent @drop="onDrop(1)">
+            <span>在右侧打开「{{ sessions.find(s => s.id === draggingSession)?.name }}」⇥</span>
+          </div>
+        </div>
+      </div>
 
       <div class="resize-handle" @mousedown="startResize($event, 'info')"></div>
 
@@ -267,6 +375,22 @@ onUnmounted(() => {
 @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
 
 .detail-body { flex: 1; display: flex; overflow: hidden; }
+
+/* 聊天区：单/双栏容器，position: relative 供落区绝对定位 */
+.chat-area { flex: 1; display: flex; position: relative; overflow: hidden; min-width: 0; }
+
+/* 分屏分隔条：5px col-resize */
+.pane-divider { width: 5px; flex-shrink: 0; background: var(--border); cursor: col-resize; }
+.pane-divider:hover { background: #3b5bdb; }
+
+/* 拖拽落区：盖住聊天区，左右两个半区 */
+.drop-overlay { position: absolute; inset: 0; display: flex; z-index: 20; }
+.dropzone {
+  flex: 1; margin: 12px; border: 2px dashed var(--accent); border-radius: 14px;
+  background: var(--accent-sub);
+  display: flex; align-items: center; justify-content: center;
+  color: #7b8cde; font-size: 13px; font-weight: 600;
+}
 .resize-handle {
   width: 6px; flex-shrink: 0; cursor: col-resize;
   background: #2a2a38; transition: background 0.15s;
