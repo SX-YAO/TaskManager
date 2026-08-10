@@ -7,9 +7,13 @@ import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { createTask, listTasks, getTask, archiveTask, deleteTask,
          setScopeEnabled, addWatchedRepo, removeWatchedRepo,
-         updateWatchedRepoBranch, normalizeRepo, setSessionId } from './taskManager.js';
+         updateWatchedRepoBranch, normalizeRepo,
+         listSessions, getSession, createSession, renameSession,
+         closeSession, setSessionSid } from './taskManager.js';
 import { getCache, setCache } from './diff-cache.js';
-import { readMessages, readTaskContext, listArtifacts, readArtifact } from './storage.js';
+import { readSessionMessages, appendSessionMessage, readTaskContext, listArtifacts, readArtifact } from './storage.js';
+import { stopRuntime, broadcastTask } from './runtime.js';
+import { aggregateStatus } from './taskManager.js';
 import { readConfig } from './config.js';
 
 const execFileAsync = promisify(execFile);
@@ -60,8 +64,8 @@ router.get('/tasks/:id', (req, res) => {
 
 router.get('/tasks/:id/messages', (req, res) => {
   try {
-    getTask(req.params.id); // 验证任务存在
-    res.json(readMessages(req.params.id));
+    getTask(req.params.id);
+    res.json(readSessionMessages(req.params.id, 'main'));
   } catch {
     res.status(404).json({ error: '任务不存在' });
   }
@@ -128,14 +132,79 @@ router.delete('/tasks/:id', (req, res) => {
 });
 
 // 手动重开会话：清当前 sid（归档进 sessionHistory），下次发消息开新会话并读取任务文件恢复上下文
+// legacy 入口，代理 main 会话
 router.post('/tasks/:id/reset-context', (req, res) => {
   try {
-    const meta = getTask(req.params.id);
-    setSessionId(req.params.id, null, null, meta.contextWindow);
+    const s = getSession(req.params.id, 'main');
+    setSessionSid(req.params.id, 'main', null, null, s.contextWindow);
     res.json({ ok: true, message: '已重开会话，下次发消息将开新会话并读取任务文件恢复上下文' });
   } catch {
     res.status(404).json({ error: '任务不存在' });
   }
+});
+
+// ── 会话管理（1vN）────────────────────────────────────────────
+
+router.get('/tasks/:id/sessions', (req, res) => {
+  try { res.json(listSessions(req.params.id)); }
+  catch { res.status(404).json({ error: '任务不存在' }); }
+});
+
+router.post('/tasks/:id/sessions', (req, res) => {
+  try {
+    const session = createSession(req.params.id, req.body?.name);
+    res.status(201).json(session);
+  } catch { res.status(404).json({ error: '任务不存在' }); }
+});
+
+router.patch('/tasks/:id/sessions/:sid', (req, res) => {
+  const { name } = req.body ?? {};
+  if (!name?.trim()) return res.status(400).json({ error: 'name 必填' });
+  try { res.json(renameSession(req.params.id, req.params.sid, name)); }
+  catch (e) {
+    if (/不存在/.test(e.message)) return res.status(404).json({ error: e.message });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// 关闭会话：运行中的先走完整 stop 流程（杀 agent + 保存部分内容）；主会话拒绝
+router.post('/tasks/:id/sessions/:sid/close', (req, res) => {
+  try {
+    const rt = stopRuntime(req.params.id, req.params.sid);
+    if (rt) {
+      // 与 WS stop 流程一致：部分内容以 interrupted 落盘，避免丢消息
+      if (rt.partialText) {
+        appendSessionMessage(req.params.id, req.params.sid, {
+          role: 'assistant', content: rt.partialText,
+          timestamp: new Date().toISOString(), toolCalls: [], interrupted: true,
+        });
+      }
+      rt.processing = false; rt.partialText = ''; rt.roundToolCalls = [];
+    }
+    const session = closeSession(req.params.id, req.params.sid);
+    broadcastTask(req.params.id, { type: 'session_status_change', sessionId: req.params.sid, status: 'closed' });
+    broadcastTask(req.params.id, { type: 'status_change', status: aggregateStatus(getTask(req.params.id)) });
+    res.json(session);
+  } catch (e) {
+    if (/主会话不可关闭/.test(e.message)) return res.status(400).json({ error: e.message });
+    res.status(404).json({ error: e.message });
+  }
+});
+
+router.get('/tasks/:id/sessions/:sid/messages', (req, res) => {
+  try {
+    getSession(req.params.id, req.params.sid); // 验证存在
+    res.json(readSessionMessages(req.params.id, req.params.sid));
+  } catch { res.status(404).json({ error: '会话不存在' }); }
+});
+
+// 会话级手动重开（唯一重开方式；撑爆只提示不自动清 sid）
+router.post('/tasks/:id/sessions/:sid/reset-context', (req, res) => {
+  try {
+    const s = getSession(req.params.id, req.params.sid);
+    setSessionSid(req.params.id, req.params.sid, null, null, s.contextWindow);
+    res.json({ ok: true, message: '已重开会话，下次发消息将开新会话并读取任务文件恢复上下文' });
+  } catch { res.status(404).json({ error: '会话不存在' }); }
 });
 
 // ── 改动范围（Repo Scope）管理 ─────────────────────────────────
