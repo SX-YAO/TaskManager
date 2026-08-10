@@ -6,7 +6,8 @@
     "init": "node scripts/init.js",
     "dev:server": "node server/index.js",
     "dev:client": "cd client && npm run dev",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\""
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "test": "node --test \"server/**/*.test.js\""
   },
   "dependencies": {
     "express": "^4.19.2",

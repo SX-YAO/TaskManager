@@ -3,7 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 
-const BASE          = path.join(os.homedir(), '.task-manager');
+// TASK_MANAGER_HOME 环境变量可覆盖数据根目录（测试隔离用）
+const BASE          = process.env.TASK_MANAGER_HOME || path.join(os.homedir(), '.task-manager');
 const REGISTRY_FILE = path.join(BASE, 'registry.json');
 const ARCHIVE_DIR   = path.join(BASE, 'archive');
 
@@ -82,6 +83,7 @@ export function initTaskFiles(taskId, { title, projectDir, purpose, agentType = 
   // 在项目目录内创建结构
   fs.mkdirSync(path.join(dir, 'artifacts', 'reports'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'artifacts', 'plans'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'sessions', 'main'), { recursive: true }); // 保证主会话目录存在
 
   fs.writeFileSync(path.join(dir, 'purpose.md'), `## 任务目的\n\n${purpose}\n`);
   fs.writeFileSync(
@@ -129,6 +131,47 @@ export function readMessages(taskId) {
     .split('\n').filter(Boolean)
     .map(line => { try { return JSON.parse(line); } catch { return null; } })
     .filter(Boolean);
+}
+
+// ─── 会话消息（1vN）───────────────────────────────────────────
+function assertValidSessionId(sessionId) {
+  if (sessionId !== 'main' &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
+    throw new Error(`非法 sessionId: ${sessionId}`);
+  }
+}
+
+// {projectDir}/.task-manager/{taskId}/sessions/{sessionId}
+export function sessionDir(taskId, sessionId) {
+  assertValidSessionId(sessionId);
+  return path.join(resolveContentDir(taskId), 'sessions', sessionId);
+}
+
+export function appendSessionMessage(taskId, sessionId, message) {
+  const dir = sessionDir(taskId, sessionId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, 'messages.jsonl'), JSON.stringify(message) + '\n');
+}
+
+export function readSessionMessages(taskId, sessionId) {
+  const file = path.join(sessionDir(taskId, sessionId), 'messages.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf-8')
+    .split('\n').filter(Boolean)
+    .map(line => { try { return JSON.parse(line); } catch { return null; } })
+    .filter(Boolean);
+}
+
+// 旧格式迁移：根目录 messages.jsonl → sessions/main/messages.jsonl
+// 幂等：根文件不存在返回 false
+export function migrateLegacyMessages(taskId) {
+  const dir = resolveContentDir(taskId);
+  const legacy = path.join(dir, 'messages.jsonl');
+  if (!fs.existsSync(legacy)) return false;
+  const mainDir = path.join(dir, 'sessions', 'main');
+  fs.mkdirSync(mainDir, { recursive: true });
+  fs.renameSync(legacy, path.join(mainDir, 'messages.jsonl'));
+  return true;
 }
 
 // ─── 工具系统写入（由 server/tools/ 下的工具调用）──────────────
