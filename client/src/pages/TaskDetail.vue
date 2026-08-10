@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, shallowReactive } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTheme } from '../composables/useTheme.js';
 
@@ -16,8 +16,10 @@ const router = useRouter();
 const task     = ref(null);
 const sessions = ref([]);          // Session[]（会话级数据源，ChatPane 直接改 status）
 const panes    = ref(['main']);    // 打开的 sessionId 数组（最多 2 个分屏）
-// sessionId → ChatPane expose 实例（v-for 多模板 ref 顺序不被保证，改用函数 ref 建 Map）
-const paneRefs = new Map();
+// sessionId → ChatPane expose 实例（v-for 多模板 ref 顺序不被保证，改用函数 ref 建 Map；
+// shallowReactive 让 wsConnected computed 能追踪 set/get——普通 Map 非响应式会导致状态点卡住；
+// 必须 shallow，避免组件实例被深响应式包装）
+const paneRefs = shallowReactive(new Map());
 function setPaneRef(sid, el) {
   if (el) paneRefs.set(sid, el);
   else    paneRefs.delete(sid);
