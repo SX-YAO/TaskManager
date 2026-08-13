@@ -216,14 +216,16 @@ onMounted(loadTasks);
 
 .grid-area { flex: 1; overflow-y: auto; padding: 24px 28px; }
 .empty { color: #555; font-size: 14px; padding: 40px 0; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+/* 卡片列宽固定，所有卡片宽高一致 */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, 260px); gap: 14px; }
 
 .card-new {
   border: 1.5px dashed #2a2a38; border-radius: 12px; padding: 18px;
-  min-height: 120px; display: flex; flex-direction: column;
+  height: 232px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 8px;
   cursor: pointer; font-size: 12px; color: #444;
   transition: border-color 0.15s, color 0.15s;
+  box-sizing: border-box;
 }
 .card-new:hover { border-color: #3b5bdb; color: #3b5bdb; }
 .plus { font-size: 22px; }

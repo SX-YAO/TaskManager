@@ -77,8 +77,8 @@ function fmtTime(iso) {
       {{ STATUS[task.status]?.label ?? task.status }}
     </div>
 
-    <!-- 任务目的 -->
-    <div v-if="task.purpose" class="card-purpose">{{ firstLine(task.purpose) }}</div>
+    <!-- 任务目的：固定高度，无目的时占位保持卡片等高 -->
+    <div class="card-purpose">{{ task.purpose ? firstLine(task.purpose) : '' }}</div>
 
     <div class="card-meta">
       <span>📁 {{ dirName(task.projectDir) }}</span>
@@ -112,6 +112,9 @@ function fmtTime(iso) {
   position: relative;
   overflow: hidden;
   transition: border-color 0.15s, transform 0.1s;
+  /* 所有卡片固定尺寸，内容差异用占位吸收 */
+  height: 232px;
+  display: flex; flex-direction: column;
 }
 .card:hover { border-color: #3a3a4e; transform: translateY(-1px); }
 
@@ -197,19 +200,21 @@ function fmtTime(iso) {
   margin-bottom: 10px;
   display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
   overflow: hidden;
+  /* 固定一行高度，无目的时占位 */
+  height: 15px; flex-shrink: 0;
 }
 
 .card-meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
 .card-meta span { display: flex; align-items: center; gap: 6px; }
 
-/* ── 会话角标 ── */
-.card-sessions { display: flex; gap: 6px; margin-top: 8px; }
+/* ── 会话角标：固定高度，无角标时占位 ── */
+.card-sessions { display: flex; gap: 6px; margin-top: 8px; height: 20px; flex-shrink: 0; }
 .sess-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .sess-badge.running { background: rgba(64,192,87,.1); color: #40c057; }
 .sess-badge.total   { background: rgba(59,91,219,.12); color: #7b8cde; }
 
-/* ── 底部提示区：note 或空白占位，保持高度一致 ── */
-.card-note-area { margin-top: 8px; }
+/* ── 底部提示区：note 或空白占位，保持高度一致；margin-top:auto 钉在卡片底部 ── */
+.card-note-area { margin-top: auto; }
 
 .note-placeholder {
   /* 与 pending-note/error-note 同高：padding(5+5) + line-height(1.4*11≈15) + border(2) ≈ 27px */
