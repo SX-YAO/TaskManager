@@ -19,7 +19,11 @@ async function request(method, url, body) {
       throw new Error(`Service offline (HTTP ${res.status})`);
     }
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      // 后端业务错误带 { error: '...' }，透出具体原因；非 JSON 响应体回落原行为
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || `HTTP ${res.status}`);
+    }
     if (res.status === 204) return null;
     return res.json();
   } catch (e) {

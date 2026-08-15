@@ -33,6 +33,7 @@ async function openFile(p) {
     savedContent.value = f.content;
     activeSource.value = f.source;
     renaming.value = false;
+    error.value = '';
   } catch (e) { error.value = e.message; }
 }
 
@@ -52,8 +53,12 @@ async function resetToDefault() {
     await http.deleteSkillFile(props.name, activePath.value);
     const p = activePath.value;
     activePath.value = '';
+    content.value = '';
+    savedContent.value = '';
+    error.value = '';
     await loadTree(false);
-    await openFile(p).catch(() => { activePath.value = ''; content.value = ''; savedContent.value = ''; });
+    await openFile(p);   // 默认版仍在则重开（成功路径会清 error）
+    if (activePath.value !== p) error.value = '';   // source=new 删除后无默认版可回退：保持空态，不留 404
   } catch (e) { error.value = e.message; }
 }
 
