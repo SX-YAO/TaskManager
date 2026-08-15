@@ -3,8 +3,9 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { http } from '../api/http.js';
 import BranchSelector from './BranchSelector.vue';
 import ConventionPanel from './ConventionPanel.vue';
+import SkillListPanel from './SkillListPanel.vue';
 
-const activeTab = ref('info');        // 'info' | 'conventions'
+const activeTab = ref('info');        // 'info' | 'conventions' | 'skills'
 const convPanelRef = ref(null);
 function switchTab(t) {
   activeTab.value = t;
@@ -130,8 +131,9 @@ onUnmounted(() => {
     <div class="panel-tabs">
       <span class="p-tab" :class="{ active: activeTab === 'info' }" @click="switchTab('info')">信息</span>
       <span class="p-tab" :class="{ active: activeTab === 'conventions' }" @click="switchTab('conventions')">规范</span>
+      <span class="p-tab" :class="{ active: activeTab === 'skills' }" @click="switchTab('skills')">技能</span>
     </div>
-    <div v-show="activeTab === 'info'">
+    <div class="tab-body tab-scroll" v-show="activeTab === 'info'">
     <div v-if="!context" class="loading">加载中…</div>
     <template v-else>
 
@@ -285,20 +287,26 @@ onUnmounted(() => {
 
     </template>
     </div>
-    <ConventionPanel v-show="activeTab === 'conventions'" ref="convPanelRef" :task-id="taskId" />
+    <ConventionPanel v-show="activeTab === 'conventions'" ref="convPanelRef" :task-id="taskId" class="tab-body" />
+    <SkillListPanel v-show="activeTab === 'skills'" class="tab-body" />
   </div>
 </template>
 
 <style scoped>
-.panel-tabs { display: flex; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-surface); z-index: 2; }
+.panel-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--bg-surface); flex-shrink: 0; }
 .p-tab { flex: 1; text-align: center; font-size: 12px; padding: 10px 0; color: var(--text-muted); cursor: pointer; }
 .p-tab.active { color: var(--text-primary); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
 .info-panel {
   background: var(--bg-surface);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   flex-shrink: 0;
   font-size: 12px;
 }
+/* tab 内容区：占满 tabs 之下的剩余高度，各自管理滚动，避免 panel-tabs 高度挤压内容 */
+.tab-body { flex: 1; min-height: 0; }
+.tab-scroll { overflow-y: auto; }
 .loading { padding: 20px; color: #555; }
 .section {
   padding: 14px 16px;

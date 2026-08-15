@@ -123,7 +123,7 @@ defineExpose({ reload: load });
 </template>
 
 <style scoped>
-.conv-panel { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.conv-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; font-size: 12px; }
 .conv-head { padding: 10px 12px 6px; }
 .scope-switch { display: inline-flex; background: var(--bg-surface-3); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .scope-opt { font-size: 11px; padding: 5px 12px; color: var(--text-muted); cursor: pointer; }
