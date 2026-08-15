@@ -21,6 +21,7 @@ import progressTool from './progress.js';
 import pitfallTool  from './pitfall.js';
 import conventionTool from './convention.js';
 import reposTool    from './repos.js';
+import { record } from '../metrics.js';
 
 // ── 协议版本（破坏性变更时递增）────────────────────────────────
 export const TOOL_PROTOCOL_VERSION = '1.1';
@@ -66,21 +67,32 @@ export function parseLine(line) {
 // ── 工具分发器 ─────────────────────────────────────────────────
 /**
  * 分发工具调用到对应 handler
- * @param {{ name: string, args: Record<string, string> }} tool
- * @param {{ taskId: string, sessionId: string, broadcast: (data: object) => void }} ctx
+ * @returns {{ ok: true } | { ok: false, error: string }}
+ *   handler 返回 undefined → ok；返回 { error } 或抛异常 → ok:false。
+ *   调用方（claude.js）收集失败结果，下一轮 digest 告警（工具回执）。
  */
 export function dispatch(tool, ctx) {
+  const preview = JSON.stringify(tool.args ?? {}).slice(0, 120);
   const handler = TOOL_REGISTRY[tool.name];
   if (!handler) {
-    // 未知工具：静默忽略，记录 warn（不影响正常流程）
     console.warn(`[tools] 未知工具: task:${tool.name}，已忽略`);
-    return;
+    record('tool_call', { tool: tool.name, ok: false, error: '未知工具', preview, taskId: ctx?.taskId });
+    return { ok: false, error: `未知工具: task:${tool.name}` };
   }
+  let result;
   try {
-    handler.handle(tool.args, ctx);
+    result = handler.handle(tool.args, ctx);
   } catch (e) {
     console.error(`[tool:${tool.name}] 处理异常:`, e.message);
+    record('tool_call', { tool: tool.name, ok: false, error: e.message, preview, taskId: ctx?.taskId });
+    return { ok: false, error: e.message };
   }
+  if (result && result.error) {
+    record('tool_call', { tool: tool.name, ok: false, error: result.error, preview, taskId: ctx?.taskId });
+    return { ok: false, error: result.error };
+  }
+  record('tool_call', { tool: tool.name, ok: true, preview, taskId: ctx?.taskId });
+  return { ok: true };
 }
 
 // ── 注入 Agent 的 System Prompt ─────────────────────────────────
