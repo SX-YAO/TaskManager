@@ -16,6 +16,11 @@ import { stopRuntime, broadcastTask } from './runtime.js';
 import { aggregateStatus } from './taskManager.js';
 import { readConfig } from './config.js';
 import { runRetro } from './retro.js';
+import { listTaskConventions, listGlobalConventions, addTaskEntry, addGlobalEntry,
+         updateTaskEntry, updateGlobalEntry, removeTaskEntry, removeGlobalEntry,
+         promoteTaskEntry, demoteGlobalToTask, confirmGlobalEntry } from './conventions.js';
+import { listSkills, getSkillTree, readSkillFile, writeUserSkillFile, deleteUserSkillFile } from './skillManager.js';
+import { record, summary as metricsSummary } from './metrics.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -253,6 +258,129 @@ router.delete('/tasks/:id/repos', (req, res) => {
     const meta = removeWatchedRepo(req.params.id, repoPath);
     res.json({ watchedRepos: meta.watchedRepos.map(normalizeRepo) });
   } catch { res.status(404).json({ error: '任务不存在' }); }
+});
+
+// ── 规范（conventions）管理 ───────────────────────────────────
+
+router.get('/conventions', (_req, res) => {
+  res.json(listGlobalConventions());
+});
+
+router.post('/conventions', (req, res) => {
+  const { text } = req.body ?? {};
+  if (!text?.trim()) return res.status(400).json({ error: 'text 必填' });
+  const { entry } = addGlobalEntry({ text: text.trim(), origin: 'human', candidate: false });
+  record('convention_edit', { op: 'add', scope: 'global' });
+  res.status(201).json(entry);
+});
+
+router.patch('/conventions/:cid', (req, res) => {
+  const { text } = req.body ?? {};
+  if (!text?.trim()) return res.status(400).json({ error: 'text 必填' });
+  const r = updateGlobalEntry(req.params.cid, text.trim());
+  if (r.error) return res.status(404).json({ error: r.error });
+  record('convention_edit', { op: 'update', scope: 'global' });
+  res.json(r.entry);
+});
+
+router.delete('/conventions/:cid', (req, res) => {
+  removeGlobalEntry(req.params.cid);
+  record('convention_edit', { op: 'delete', scope: 'global' });
+  res.status(204).end();
+});
+
+router.post('/conventions/:cid/confirm', (req, res) => {
+  const r = confirmGlobalEntry(req.params.cid);
+  if (r.error) return res.status(404).json({ error: r.error });
+  record('convention_edit', { op: 'confirm', scope: 'global' });
+  res.json(r.entry);
+});
+
+router.post('/conventions/:cid/demote', (req, res) => {
+  const { taskId } = req.body ?? {};
+  if (!taskId) return res.status(400).json({ error: 'taskId 必填' });
+  const r = demoteGlobalToTask(req.params.cid, taskId);
+  if (r.error) return res.status(404).json({ error: r.error });
+  record('convention_edit', { op: 'demote', scope: 'global', taskId });
+  res.json(r.entry);
+});
+
+router.get('/tasks/:id/conventions', (req, res) => {
+  try { res.json(listTaskConventions(req.params.id)); }
+  catch { res.status(404).json({ error: '任务不存在' }); }
+});
+
+router.post('/tasks/:id/conventions', (req, res) => {
+  const { text } = req.body ?? {};
+  if (!text?.trim()) return res.status(400).json({ error: 'text 必填' });
+  try {
+    const { entry } = addTaskEntry(req.params.id, { text: text.trim(), origin: 'human', candidate: false });
+    record('convention_edit', { op: 'add', scope: 'task', taskId: req.params.id });
+    res.status(201).json(entry);
+  } catch { res.status(404).json({ error: '任务不存在' }); }
+});
+
+router.patch('/tasks/:id/conventions/:cid', (req, res) => {
+  const { text } = req.body ?? {};
+  if (!text?.trim()) return res.status(400).json({ error: 'text 必填' });
+  const r = updateTaskEntry(req.params.id, req.params.cid, text.trim());
+  if (r.error) return res.status(404).json({ error: r.error });
+  record('convention_edit', { op: 'update', scope: 'task', taskId: req.params.id });
+  res.json(r.entry);
+});
+
+router.delete('/tasks/:id/conventions/:cid', (req, res) => {
+  removeTaskEntry(req.params.id, req.params.cid);
+  record('convention_edit', { op: 'delete', scope: 'task', taskId: req.params.id });
+  res.status(204).end();
+});
+
+router.post('/tasks/:id/conventions/:cid/promote', (req, res) => {
+  const r = promoteTaskEntry(req.params.id, req.params.cid);
+  if (r.error) return res.status(404).json({ error: r.error });
+  record('convention_edit', { op: 'promote', scope: 'task', taskId: req.params.id });
+  res.json(r.entry);
+});
+
+// ── 技能（skills）管理 ───────────────────────────────────────
+
+router.get('/skills', (_req, res) => {
+  res.json(listSkills());
+});
+
+router.get('/skills/:name/tree', (req, res) => {
+  try { res.json(getSkillTree(req.params.name)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.get('/skills/:name/file', (req, res) => {
+  try { res.json(readSkillFile(req.params.name, req.query.path)); }
+  catch (e) {
+    if (/不存在/.test(e.message)) return res.status(404).json({ error: e.message });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.put('/skills/:name/file', (req, res) => {
+  const { content } = req.body ?? {};
+  if (typeof content !== 'string') return res.status(400).json({ error: 'content 必填' });
+  try {
+    writeUserSkillFile(req.params.name, req.query.path, content);
+    res.json(readSkillFile(req.params.name, req.query.path));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete('/skills/:name/file', (req, res) => {
+  try {
+    deleteUserSkillFile(req.params.name, req.query.path);
+    res.status(204).end();
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── 埋点聚合 ─────────────────────────────────────────────────
+
+router.get('/metrics/summary', (_req, res) => {
+  res.json(metricsSummary());
 });
 
 // 服务健康状态（心跳检测用）
