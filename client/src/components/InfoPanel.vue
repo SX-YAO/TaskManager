@@ -2,6 +2,14 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { http } from '../api/http.js';
 import BranchSelector from './BranchSelector.vue';
+import ConventionPanel from './ConventionPanel.vue';
+
+const activeTab = ref('info');        // 'info' | 'conventions'
+const convPanelRef = ref(null);
+function switchTab(t) {
+  activeTab.value = t;
+  if (t === 'conventions') convPanelRef.value?.reload();
+}
 
 const props = defineProps({
   taskId: { type: String, required: true },
@@ -119,6 +127,11 @@ onUnmounted(() => {
 
 <template>
   <div class="info-panel">
+    <div class="panel-tabs">
+      <span class="p-tab" :class="{ active: activeTab === 'info' }" @click="switchTab('info')">信息</span>
+      <span class="p-tab" :class="{ active: activeTab === 'conventions' }" @click="switchTab('conventions')">规范</span>
+    </div>
+    <div v-show="activeTab === 'info'">
     <div v-if="!context" class="loading">加载中…</div>
     <template v-else>
 
@@ -271,10 +284,15 @@ onUnmounted(() => {
       </section>
 
     </template>
+    </div>
+    <ConventionPanel v-show="activeTab === 'conventions'" ref="convPanelRef" :task-id="taskId" />
   </div>
 </template>
 
 <style scoped>
+.panel-tabs { display: flex; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-surface); z-index: 2; }
+.p-tab { flex: 1; text-align: center; font-size: 12px; padding: 10px 0; color: var(--text-muted); cursor: pointer; }
+.p-tab.active { color: var(--text-primary); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
 .info-panel {
   background: var(--bg-surface);
   overflow-y: auto;

@@ -84,4 +84,25 @@ export const http = {
   getClaudePlugins:   ()          => request('GET',  '/claude/plugins'),
   getClaudeSkills:    ()          => request('GET',  '/claude/skills'),
   addClaudePermission: (pattern)  => request('POST', '/claude/permissions/allow', { pattern }),
+
+  // ── 规范 ──
+  getGlobalConventions:  () => request('GET', '/conventions'),
+  addGlobalConvention:   (text) => request('POST', '/conventions', { text }),
+  updateGlobalConvention:(cid, text) => request('PATCH', `/conventions/${cid}`, { text }),
+  deleteGlobalConvention:(cid) => request('DELETE', `/conventions/${cid}`),
+  confirmGlobalConvention:(cid) => request('POST', `/conventions/${cid}/confirm`),
+  demoteGlobalConvention:(cid, taskId) => request('POST', `/conventions/${cid}/demote`, { taskId }),
+  getConventions:        (taskId) => request('GET', `/tasks/${taskId}/conventions`),
+  addConvention:         (taskId, text) => request('POST', `/tasks/${taskId}/conventions`, { text }),
+  updateConvention:      (taskId, cid, text) => request('PATCH', `/tasks/${taskId}/conventions/${cid}`, { text }),
+  deleteConvention:      (taskId, cid) => request('DELETE', `/tasks/${taskId}/conventions/${cid}`),
+  promoteConvention:     (taskId, cid) => request('POST', `/tasks/${taskId}/conventions/${cid}/promote`),
+  // ── 技能 ──
+  getSkills:      () => request('GET', '/skills'),
+  getSkillTree:   (name) => request('GET', `/skills/${name}/tree`),
+  getSkillFile:   (name, p) => request('GET', `/skills/${name}/file?path=${encodeURIComponent(p)}`),
+  saveSkillFile:  (name, p, content) => request('PUT', `/skills/${name}/file?path=${encodeURIComponent(p)}`, { content }),
+  deleteSkillFile:(name, p) => request('DELETE', `/skills/${name}/file?path=${encodeURIComponent(p)}`),
+  // ── 指标 ──
+  getMetricsSummary: () => request('GET', '/metrics/summary'),
 };
