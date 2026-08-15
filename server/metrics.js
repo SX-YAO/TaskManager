@@ -36,6 +36,22 @@ function readEvents() {
 }
 
 export function summary() {
+  try {
+    return computeSummary();
+  } catch (e) {
+    // 兜底：读盘竞争（TOCTOU）、EISDIR 等任何失败都静默 warn，返回空聚合，永不抛给调用方
+    console.warn('[metrics] 聚合失败:', e.message);
+    return {
+      toolCall: { total: 0, okRate: 1, byTool: {} },
+      distill:  { runs: 0, produced: 0, promoted: 0, zero: 0 },
+      conventionEdit: { total: 0, updateDelete: 0 },
+      editRate: 0,
+      digest:   { count: 0, avgBytes: 0 },
+    };
+  }
+}
+
+function computeSummary() {
   const since = Date.now() - 7 * 24 * 3600 * 1000;
   const events = readEvents().filter(e => new Date(e.ts).getTime() >= since);
 

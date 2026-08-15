@@ -47,3 +47,18 @@ test('超过 5MB 轮转为 events.1.jsonl', () => {
   assert.ok(fs.existsSync(path.join(TMP, 'metrics', 'events.1.jsonl')));
   assert.ok(fs.readFileSync(file, 'utf-8').includes('tool_call'));
 });
+
+test('readFileSync 抛异常时 summary 不抛错，返回空聚合', () => {
+  // 把 events.1.jsonl 建成目录 → readFileSync 抛 EISDIR（模拟 TOCTOU/坏路径）
+  fs.rmSync(path.join(TMP, 'metrics'), { recursive: true, force: true });
+  fs.mkdirSync(path.join(TMP, 'metrics', 'events.1.jsonl'), { recursive: true });
+  let s;
+  assert.doesNotThrow(() => { s = metrics.summary(); });
+  assert.equal(s.toolCall.total, 0);
+  assert.equal(s.toolCall.okRate, 1);
+  assert.deepEqual(s.toolCall.byTool, {});
+  assert.equal(s.distill.runs, 0);
+  assert.equal(s.conventionEdit.total, 0);
+  assert.equal(s.editRate, 0);
+  assert.equal(s.digest.count, 0);
+});
