@@ -129,7 +129,9 @@ wss.on('connection', (ws, req) => {
       currentMeta.dangerouslySkipPermissions,
       conflictWarning, scopeConstraint, recentContext,
       sessionId,   // ← 任务会话 id，进 toolCtx 供 signal 等工具使用
+      rt.toolErrors ?? [],   // ← 上轮工具失败回执，进本轮 digest 告警
     );
+    rt.toolErrors = [];
     rt.agent = agent;
 
     try {
@@ -139,7 +141,7 @@ wss.on('connection', (ws, req) => {
           rt.partialText += chunk;
           broadcastTo(taskId, sessionId, { type: 'chunk', text: chunk });
         },
-        ({ sessionId: newSid, fullText, contextTokens, contextWindow, contextOverflow }) => {
+        ({ sessionId: newSid, fullText, contextTokens, contextWindow, contextOverflow, toolErrors }) => {
           // ⚠️ 撑爆仅提示，不清 sid、不自动重开（上下文计算不准确，仅支持手动重开）
           if (contextOverflow) {
             broadcastTo(taskId, sessionId, {
@@ -155,6 +157,7 @@ wss.on('connection', (ws, req) => {
             toolCalls: [...rt.roundToolCalls],
           });
           rt.roundToolCalls = [];
+          rt.toolErrors = toolErrors ?? [];
           broadcastTo(taskId, sessionId, { type: 'done', sessionId: newSid });
         },
         (name, input) => {

@@ -13,13 +13,9 @@ export default {
   name: 'progress',
 
   promptText: `
-### task:progress — 有进度变化时更新
+### task:progress — 完成阶段性进展或待办变化时更新（覆盖写）
 <task:progress summary="当前进度概要" completed="步骤1,步骤2" pending="步骤3,步骤4" />
-
-pending 写到「可接力」颗粒度：每个待办步骤要能让一个全新会话（无对话历史）读懂并直接动手。
-格式建议：步骤名 + 关键文件路径 + 卡点/下一步具体动作。例：
-pending="修复 login 403：src/api/login.ts 的 token 刷新逻辑，卡在 refreshToken 未触发；改完跑 npm test"
-上下文撑满时用户会手动重开会话，新会话只读 purpose/progress/pitfalls 恢复，pending 是接力的命脉。
+pending 必须写到「可接力」颗粒度，质量标准见 task-discipline skill。
 `.trim(),
 
   schema: {
@@ -34,6 +30,7 @@ pending="修复 login 403：src/api/login.ts 的 token 刷新逻辑，卡在 ref
    */
   handle(args, { taskId }) {
     const { summary = '', completed = '', pending: pend = '' } = args;
+    if (!summary) return { error: '缺少 summary' };
 
     const completedSteps = completed
       ? completed.split(',').map(s => s.trim()).filter(Boolean)

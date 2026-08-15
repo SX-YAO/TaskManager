@@ -4,6 +4,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { readConfig } from '../config.js';
 import { parseLine, dispatch, SYSTEM_PROMPT as TOOLS_PROMPT } from '../tools/index.js';
+import { buildDigest } from '../digest.js';
+import { record } from '../metrics.js';
 
 // 使用相对路径：Claude 以 projectDir 为 cwd 启动，.task-manager/{taskId}/ 即为任务目录
 const SYSTEM_PROMPT_TEMPLATE = (taskId) => [
@@ -14,12 +16,20 @@ const SYSTEM_PROMPT_TEMPLATE = (taskId) => [
   `2. .task-manager/${taskId}/progress.json  — 当前执行进度（必读）`,
   `3. .task-manager/${taskId}/pitfalls.json  — 历史踩坑记录（必读）`,
   '',
-  '在工作过程中请主动维护以下文件：',
-  `- 有新进展时：通过工具更新进度（见下方工具说明）`,
-  `- 遇到错误或总结经验时：通过工具记录踩坑`,
-  `- 产出分析报告时：写入 .task-manager/${taskId}/artifacts/reports/<日期-主题>.md`,
-  `- 产出实施方案时：写入 .task-manager/${taskId}/artifacts/plans/<日期-主题>.md`,
+  '进度更新/踩坑记录/规范遵守的质量标准与触发时机，见 task-discipline skill。',
 ].join('\n');
+
+/**
+ * 同一轮对话的工具调用幂等 key。
+ * - signal 保持 "signal:<action>"（只按 action 去重，close 兜底检查 'signal:done' 依赖此格式）
+ * - 其他工具附带完整参数摘要：同轮重复完全相同的调用仍被去重，
+ *   但不同参数的调用（如两条不同 text 的 convention add）不会被误杀
+ */
+export function toolKey(tool) {
+  const args = tool.args ?? {};
+  if (tool.name === 'signal') return `signal:${args.action ?? 'signal'}`;
+  return `${tool.name}:${args.action ?? ''}:${JSON.stringify(args)}`;
+}
 
 /**
  * 读会话文件最后一条非0 assistant 的 usage，返回真实单次上下文占用。
@@ -62,9 +72,10 @@ function readLastUsage(projectDir, sid) {
  * @param {string|null} scopeConstraint  写入范围约束文本
  * @param {string|null} recentContext    重开会话时携带的最近对话
  * @param {string} taskSessionId         任务会话 id（main 或子会话 id），进 toolCtx 供 signal 等工具使用
+ * @param {string[]} prevToolErrors      上轮工具调用失败清单，进本轮 digest 告警（工具回执）
  * @returns {import('./base.js').Agent}
  */
-export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerouslySkipPermissions = false, conflictWarning = null, scopeConstraint = null, recentContext = null, taskSessionId = 'main') {
+export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerouslySkipPermissions = false, conflictWarning = null, scopeConstraint = null, recentContext = null, taskSessionId = 'main', prevToolErrors = []) {
   let aborted = false;
   let currentProc = null;
 
@@ -82,12 +93,14 @@ export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerou
       // broadcast 降级：调用方未传时提供空实现，避免工具内部报错
       const safeBroadcast = typeof broadcast === 'function' ? broadcast : () => {};
 
-      // 组装 system prompt：任务背景 + 冲突警告 + 写入范围约束 + 最近对话 + 工具协议
-      const parts = [SYSTEM_PROMPT_TEMPLATE(taskId)];
+      // 组装 system prompt：静态部分在前（缓存命中），digest 简报变动最大放最后
+      const digest = buildDigest(taskId, prevToolErrors);
+      record('digest_inject', { taskId, bytes: Buffer.byteLength(digest) });
+      const parts = [SYSTEM_PROMPT_TEMPLATE(taskId), TOOLS_PROMPT];
       if (conflictWarning)  parts.push(conflictWarning);
       if (scopeConstraint)  parts.push(scopeConstraint);   // 仅 scopeEnabled=true 时有值
       if (recentContext)    parts.push(recentContext);     // 重开会话时携带的最近对话
-      parts.push(TOOLS_PROMPT);
+      parts.push(digest);
       const systemPrompt = parts.join('\n\n');
 
       const args = [
@@ -123,11 +136,12 @@ export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerou
         let contextWindow = null;         // 模型上下文窗口大小（来自 modelUsage.contextWindow）
         let contextOverflow = false;      // claude 自报上下文撑爆（Prompt too long / thrashing），强制重开
 
-        // 同一轮对话的工具信号幂等控制
-        // key 格式："toolName:action"（signal）或 "toolName:toolName"（其他工具）
+        // 同一轮对话的工具信号幂等控制（key 生成见 toolKey）
         const firedSignals = new Set();
 
-        const toolCtx = { taskId, sessionId: taskSessionId, broadcast: safeBroadcast };
+        const toolCtx = { taskId, sessionId: taskSessionId, broadcast: safeBroadcast, origin: 'agent' };
+
+        const toolErrors = [];   // 本轮工具调用失败清单 → onDone 带给 index.js 存 rt
 
         proc.stdout.on('data', (chunk) => {
           buffer += chunk.toString();
@@ -189,10 +203,11 @@ export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerou
           for (const tl of textLines) {
             const tool = parseLine(tl);
             if (tool) {
-              const key = `${tool.name}:${tool.args.action ?? tool.name}`;
+              const key = toolKey(tool);
               if (!firedSignals.has(key)) {
                 firedSignals.add(key);
-                dispatch(tool, toolCtx);
+                const res = dispatch(tool, toolCtx);
+                if (!res.ok) toolErrors.push(`task:${tool.name} ${res.error}`);
               }
             } else {
               cleanLines.push(tl);
@@ -227,7 +242,7 @@ export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerou
           if (code !== 0 && !fullText) {
             return reject(new Error(`Claude 进程退出码 ${code}`));
           }
-          try { onDone({ sessionId: newSessionId, fullText, contextTokens, contextWindow, contextOverflow }); } finally { resolve(); }
+          try { onDone({ sessionId: newSessionId, fullText, contextTokens, contextWindow, contextOverflow, toolErrors }); } finally { resolve(); }
         });
 
         proc.on('error', reject);

@@ -13,8 +13,9 @@ export default {
   name: 'pitfall',
 
   promptText: `
-### task:pitfall — 遇到错误或经验时记录
-<task:pitfall type="error" description="问题描述" solution="解决方案" />
+### task:pitfall — 遇到错误或总结经验时记录
+<task:pitfall type="error" description="现象+根因+关联文件" solution="解决+预防" />
+质量标准（五要素）见 task-discipline skill。
 `.trim(),
 
   schema: {
@@ -30,10 +31,7 @@ export default {
   handle(args, { taskId }) {
     const { type = 'error', description, solution = '' } = args;
 
-    if (!description) {
-      console.warn('[tool:pitfall] 缺少 description 参数，已忽略');
-      return;
-    }
+    if (!description) return { error: '缺少 description' };
 
     appendPitfall(taskId, {
       timestamp: new Date().toISOString(),
