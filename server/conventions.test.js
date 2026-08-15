@@ -76,5 +76,15 @@ test('convention 工具 handle：add/merge/promote + 参数校验返回 error', 
 
 test('readTaskConventions 文件缺失容错返回空 items', async () => {
   const storage = await import('./storage.js');
-  assert.deepEqual(storage.readTaskConventions(taskB).items.length >= 0, true);
+  // 新任务初始化后删除 conventions.json，覆盖 readConventionsFile 的 catch 分支
+  const taskC = createTask({ title: 'c', projectDir: PROJECT, purpose: 'p' }).id;
+  fs.rmSync(path.join(PROJECT, '.task-manager', taskC, 'conventions.json'));
+  assert.deepEqual(storage.readTaskConventions(taskC), { items: [] });
+});
+
+test('readTaskConventions 文件损坏容错返回空 items 而非抛异常', async () => {
+  const storage = await import('./storage.js');
+  const file = path.join(PROJECT, '.task-manager', taskB, 'conventions.json');
+  fs.writeFileSync(file, '这不是合法 JSON {{{');
+  assert.deepEqual(storage.readTaskConventions(taskB), { items: [] });
 });
