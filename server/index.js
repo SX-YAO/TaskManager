@@ -9,6 +9,7 @@ import { getTask, listTasks, listSessions, getSession,
 import { appendSessionMessage, readSessionMessages } from './storage.js';
 import { createClaudeAgent } from './agents/claude.js';
 import { sessionRuntimes, getRuntime, broadcastTo, broadcastTask, stopRuntime } from './runtime.js';
+import { syncAllNativeSkills } from './skillManager.js';
 
 const app = express();
 app.use(express.json());
@@ -32,6 +33,8 @@ listTasks().forEach(t => {
     .filter(s => ['paused', 'interrupted'].includes(s.status))
     .forEach(s => updateSessionStatus(t.id, s.id, 'reviewing'));
 });
+// ④ 技能 native 投递：启动时把生效版同步到 ~/.claude/skills/
+syncAllNativeSkills();
 
 wss.on('connection', (ws, req) => {
   const { searchParams } = new URL(req.url, 'http://localhost');

@@ -263,3 +263,6 @@ export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerou
     },
   };
 }
+
+// 技能投递模式：native（由 skillManager 同步到 ~/.claude/skills/，Claude Code 原生加载）
+export const skillMode = 'native';
