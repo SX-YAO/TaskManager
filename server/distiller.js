@@ -32,6 +32,8 @@ export function runToolSession(systemPrompt, payload, ctx, { timeoutMs = 120000 
     proc.stderr.resume();
     const timer = setTimeout(() => { try { proc.kill(); } catch { /* 已退出 */ } }, timeoutMs);
     proc.on('error', (e) => { clearTimeout(timer); resolve({ counts: { add: 0, merge: 0, promote: 0 }, text: '', error: e.message }); });
+    // ENOENT 等启动失败时 stdin 流被 destroy，pending write 会抛 error 事件；挂空监听防 uncaughtException
+    proc.stdin.on('error', () => {});
     proc.stdin.write(JSON.stringify(payload));
     proc.stdin.end();
     proc.on('close', () => { clearTimeout(timer); resolve(parseToolOutput(out, ctx)); });

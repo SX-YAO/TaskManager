@@ -125,6 +125,8 @@ export function createClaudeAgent(taskId, projectDir, sessionId = null, dangerou
         currentProc = proc;
         proc.stderr.resume(); // 丢弃 stderr，防止缓冲区满导致进程死锁
 
+        // ENOENT 等启动失败时 stdin 流被 destroy，pending write 会抛 error 事件；挂空监听防 uncaughtException
+        proc.stdin.on('error', () => {});
         proc.stdin.write(content);
         proc.stdin.end();
 
