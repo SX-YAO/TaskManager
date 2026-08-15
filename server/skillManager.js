@@ -117,15 +117,23 @@ export function deleteUserSkillFile(name, rel) {
   syncNativeSkill(name);   // 有默认版 → 恢复默认；用户新增 → 从生效版消失
 }
 
-/** native 投递：整目录同步生效版到 ~/.claude/skills/<name>/（本目录由我们独占管理） */
+/** 标记文件：目标目录由本工具管理的凭证；无标记的既有目录视为用户自有，绝不触碰 */
+const MANAGED_MARKER = '.task-manager-managed';
+
+/** native 投递：整目录同步生效版到 ~/.claude/skills/<name>/（仅管理带标记的目录） */
 export function syncNativeSkill(name) {
   try {
     const eff = effectiveFiles(name);
     const target = path.join(NATIVE_DIR, name);
+    if (fs.existsSync(target) && !fs.existsSync(path.join(target, MANAGED_MARKER))) {
+      console.warn(`[skill] ${target} 已存在且非 TaskManager 管理（无 ${MANAGED_MARKER} 标记），跳过同步，不覆盖用户目录`);
+      return;
+    }
     fs.rmSync(target, { recursive: true, force: true });
     if (!eff.size) return;
     fs.mkdirSync(target, { recursive: true });
     for (const [rel, f] of eff) fs.copyFileSync(f.abs, path.join(target, rel));
+    fs.writeFileSync(path.join(target, MANAGED_MARKER), '');
     const sources = new Set([...eff.values()].map(f => f.source));
     record('skill_load', { name, source: sources.has('user') || sources.has('new') ? 'user' : 'default' });
   } catch (e) { console.warn(`[skill] native 同步失败 ${name}:`, e.message); }

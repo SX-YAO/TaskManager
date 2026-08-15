@@ -56,3 +56,25 @@ test('getPromptInjection 输出技能清单文本', () => {
   const s = sm.getPromptInjection();
   assert.ok(s.includes('task-discipline'));
 });
+
+test('无标记的既有同名目录不被覆盖（防误删用户自有技能）', () => {
+  const target = path.join(process.env.CLAUDE_SKILLS_DIR, 'task-discipline');
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'user-own.md'), '# 用户自己的技能\n');
+
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (...a) => warns.push(a.join(' '));
+  try { sm.syncNativeSkill('task-discipline'); }
+  finally { console.warn = origWarn; }
+
+  assert.ok(fs.existsSync(path.join(target, 'user-own.md')), '用户文件不应被删除');
+  assert.ok(!fs.existsSync(path.join(target, 'SKILL.md')), '不应写入受管内容');
+  assert.ok(warns.some(w => w.includes('跳过同步')), '应有 warn 提示');
+
+  // 恢复受管状态，避免影响其他用例
+  fs.rmSync(target, { recursive: true, force: true });
+  sm.syncNativeSkill('task-discipline');
+  assert.ok(fs.existsSync(path.join(target, '.task-manager-managed')));
+});

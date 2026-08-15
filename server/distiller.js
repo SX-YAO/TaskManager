@@ -30,13 +30,22 @@ export function runToolSession(systemPrompt, payload, ctx, { timeoutMs = 120000 
     let out = '';
     proc.stdout.on('data', (c) => out += c.toString());
     proc.stderr.resume();
-    const timer = setTimeout(() => { try { proc.kill(); } catch { /* 已退出 */ } }, timeoutMs);
-    proc.on('error', (e) => { clearTimeout(timer); resolve({ counts: { add: 0, merge: 0, promote: 0 }, text: '', error: e.message }); });
+    let killTimer;
+    const clearTimers = () => { clearTimeout(timer); if (killTimer) clearTimeout(killTimer); };
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch { /* 已退出 */ }
+      // 5s 升级：SIGTERM 被忽略则 SIGKILL（close 触发时会被 clearTimers 清掉）
+      killTimer = setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* 已退出 */ } }, 5000);
+      killTimer.unref?.();
+      // 兜底 resolve：即使子进程顽强存活，调用方也不会永久悬挂
+      resolve({ counts: { add: 0, merge: 0, promote: 0 }, text: '', error: 'timeout' });
+    }, timeoutMs);
+    proc.on('error', (e) => { clearTimers(); resolve({ counts: { add: 0, merge: 0, promote: 0 }, text: '', error: e.message }); });
     // ENOENT 等启动失败时 stdin 流被 destroy，pending write 会抛 error 事件；挂空监听防 uncaughtException
     proc.stdin.on('error', () => {});
     proc.stdin.write(JSON.stringify(payload));
     proc.stdin.end();
-    proc.on('close', () => { clearTimeout(timer); resolve(parseToolOutput(out, ctx)); });
+    proc.on('close', () => { clearTimers(); resolve(parseToolOutput(out, ctx)); });
   });
 }
 

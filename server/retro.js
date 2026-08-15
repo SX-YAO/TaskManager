@@ -64,7 +64,13 @@ export function runRetro(taskId) {
   };
   runToolSession(buildRetroPrompt(taskId), payload,
     { taskId, origin: 'retro', broadcast: () => {} })
-    .then(({ counts, text }) => {
+    .then(({ counts, text, error }) => {
+      if (error) {
+        // 失败（spawn 失败/超时）与"真零产出"区分开：记 error 字段，zero 置 false
+        console.warn('[retro]', error);
+        record('distill_run', { taskId, added: 0, merged: 0, promoted: 0, zero: false, retro: true, error });
+        return;
+      }
       writeRetroReport(taskId, text);
       record('distill_run', { taskId, added: 0, merged: 0, promoted: counts.promote, zero: counts.promote === 0, retro: true });
     })

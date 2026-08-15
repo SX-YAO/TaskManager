@@ -55,3 +55,13 @@ test('summary 超长截断 80 字', () => {
   const line = d.split('\n').find(l => l.startsWith('进度：'));
   assert.ok(line.length <= 83);   // 进度： 3 字 + 80
 });
+
+test('踩坑缺 description 的旧数据整条跳过，不渲染 undefined', () => {
+  const dir = path.join(PROJECT, '.task-manager', taskId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'pitfalls.json'),
+    JSON.stringify({ items: [{ timestamp: 't', type: 'error', solution: 'x' }] }));
+  const d = buildDigest(taskId);
+  assert.ok(!d.includes('undefined'));
+  assert.ok(!d.includes('近期踩坑'));
+});

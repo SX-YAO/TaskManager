@@ -40,10 +40,13 @@ export function buildDigest(taskId, toolErrors = []) {
   const pending = normalizeSteps(progress.pendingSteps);
   if (pending.length) lines.push(`待办：${pending.length} 项未完成`);
 
-  const recent = (pitfalls.items ?? []).slice(-3);
+  const recent = (pitfalls.items ?? [])
+    .map(p => String(p.description ?? '').trim())
+    .filter(Boolean)   // 缺 description 的旧数据整条跳过，不渲染 undefined
+    .slice(-3);
   if (recent.length) {
     lines.push('近期踩坑：');
-    for (const p of recent) lines.push(`· ${String(p.description).slice(0, 60)}`);
+    for (const desc of recent) lines.push(`· ${desc.slice(0, 60)}`);
   }
 
   const taskConv = readTaskConventions(taskId).items;
