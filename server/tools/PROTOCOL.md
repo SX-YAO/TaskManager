@@ -1,6 +1,6 @@
 # Task Manager · Agent 工具协议规范
 
-**版本**：1.0  
+**版本**：1.1  
 **适用**：所有 Agent 实现（当前：Claude CLI）
 
 ---
@@ -111,6 +111,22 @@ action=done, has_output=false   → idle（维持未运行）
 ```xml
 <task:pitfall type="error" description="MQ消费端重复消费" solution="幂等锁key=refundId TTL=24h" />
 ```
+
+---
+
+### task:convention · 规范上报
+
+Agent 发现用户的工作习惯/团队约定时上报；服务端蒸馏器也用此工具写入蒸馏结果。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| action | enum | 是 | add（新增任务级）/ merge（合并进序号条目）/ promote（晋升全局） |
+| text | string | 是 | 规范内容，单行 |
+| candidate | bool | 否 | 疑似通用规范（仅蒸馏器） |
+| target | string | 否 | merge 目标的 1-based 序号（仅蒸馏器） |
+| sources | string | 否 | promote 来源任务 id 逗号列表（仅蒸馏器） |
+
+示例：`<task:convention action="add" text="提交前必须跑 npm test" />`
 
 ---
 

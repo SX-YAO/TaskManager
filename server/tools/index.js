@@ -19,16 +19,18 @@
 import signalTool   from './signal.js';
 import progressTool from './progress.js';
 import pitfallTool  from './pitfall.js';
+import conventionTool from './convention.js';
 import reposTool    from './repos.js';
 
 // ── 协议版本（破坏性变更时递增）────────────────────────────────
-export const TOOL_PROTOCOL_VERSION = '1.0';
+export const TOOL_PROTOCOL_VERSION = '1.1';
 
 // ── 工具列表（决定注册顺序和 system prompt 拼装顺序）────────────
 const ALL_TOOLS = [
   signalTool,
   progressTool,
   pitfallTool,
+  conventionTool,
   reposTool,
 ];
 

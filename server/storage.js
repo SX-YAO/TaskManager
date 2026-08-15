@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 const BASE          = process.env.TASK_MANAGER_HOME || path.join(os.homedir(), '.task-manager');
 const REGISTRY_FILE = path.join(BASE, 'registry.json');
 const ARCHIVE_DIR   = path.join(BASE, 'archive');
+const GLOBAL_CONVENTIONS_FILE = path.join(BASE, 'conventions.json');
 
 // ─── UUID 校验 ────────────────────────────────────────────────
 function assertValidTaskId(taskId) {
@@ -91,6 +92,7 @@ export function initTaskFiles(taskId, { title, projectDir, purpose, agentType = 
     JSON.stringify({ summary: '', completedSteps: [], pendingSteps: [], updatedAt: null }, null, 2),
   );
   fs.writeFileSync(path.join(dir, 'pitfalls.json'), JSON.stringify({ items: [] }, null, 2));
+  fs.writeFileSync(path.join(dir, 'conventions.json'), JSON.stringify({ items: [] }, null, 2));
 
   // 注册到 registry —— 只存创建时已知的信息，此后不再同步内容字段
   const entry = {
@@ -268,4 +270,33 @@ export function archiveTaskFiles(taskId) {
   writeMeta(taskId, meta);
 
   return meta;
+}
+
+// ─── 规范（conventions）读写：任务级 + 全局 ─────────────────────
+function readConventionsFile(file) {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (!Array.isArray(data.items)) data.items = [];
+    return data;
+  } catch { return { items: [] }; }        // 缺失/损坏一律容错为空
+}
+
+function writeConventionsFile(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp.${randomBytes(6).toString('hex')}`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+}
+
+export function readTaskConventions(taskId) {
+  return readConventionsFile(path.join(resolveContentDir(taskId), 'conventions.json'));
+}
+export function writeTaskConventions(taskId, data) {
+  writeConventionsFile(path.join(resolveContentDir(taskId), 'conventions.json'), data);
+}
+export function readGlobalConventions() {
+  return readConventionsFile(GLOBAL_CONVENTIONS_FILE);
+}
+export function writeGlobalConventions(data) {
+  writeConventionsFile(GLOBAL_CONVENTIONS_FILE, data);
 }
