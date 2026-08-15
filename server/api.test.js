@@ -7,6 +7,7 @@ import express from 'express';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-api-'));
 process.env.TASK_MANAGER_HOME = TMP;
+process.env.CLAUDE_SKILLS_DIR = path.join(TMP, 'claude-skills');
 
 const { createTask } = await import('./taskManager.js');
 const router = (await import('./router.js')).default;
