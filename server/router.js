@@ -15,6 +15,7 @@ import { readSessionMessages, appendSessionMessage, readTaskContext, listArtifac
 import { stopRuntime, broadcastTask } from './runtime.js';
 import { aggregateStatus } from './taskManager.js';
 import { readConfig } from './config.js';
+import { runRetro } from './retro.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -115,7 +116,9 @@ router.post('/tasks/:id/reveal-artifact', (req, res) => {
 
 router.patch('/tasks/:id/archive', (req, res) => {
   try {
-    res.json(archiveTask(req.params.id));
+    const meta = archiveTask(req.params.id);
+    runRetro(req.params.id);   // 后台复盘：提炼经验进全局候选 + retrospective.md，不阻塞响应
+    res.json(meta);
   } catch {
     res.status(404).json({ error: '任务不存在' });
   }
