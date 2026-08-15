@@ -10,6 +10,7 @@ import { appendSessionMessage, readSessionMessages } from './storage.js';
 import { createClaudeAgent } from './agents/claude.js';
 import { sessionRuntimes, getRuntime, broadcastTo, broadcastTask, stopRuntime } from './runtime.js';
 import { syncAllNativeSkills } from './skillManager.js';
+import { scheduleDistill } from './distiller.js';
 
 const app = express();
 app.use(express.json());
@@ -162,6 +163,8 @@ wss.on('connection', (ws, req) => {
           rt.roundToolCalls = [];
           rt.toolErrors = toolErrors ?? [];
           broadcastTo(taskId, sessionId, { type: 'done', sessionId: newSid });
+          // 规范蒸馏：后台批量处理本轮用户消息，不阻塞回复
+          scheduleDistill(taskId, msg.content);
         },
         (name, input) => {
           rt.roundToolCalls.push({ name, input });
