@@ -287,6 +287,7 @@ function toolDesc({ name, input: inp }) {
 
 <style scoped>
 .chat-panel {
+  height: 100%;
   display: flex; flex-direction: column; flex: 1; min-width: 180px;
   border-right: 1px solid var(--border);
   background: var(--bg-base);
